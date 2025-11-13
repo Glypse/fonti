@@ -33,6 +33,11 @@ def is_variable_font(font_path: str) -> bool:
 def install(
     repo: str = typer.Argument(..., help="GitHub repository in format owner/repo"),
     release: str = typer.Argument("latest", help="Release tag"),
+    format: str = typer.Option(
+        "auto",
+        help="Font format to prefer: auto (default priority), "
+        "variable-ttf, otf, static-ttf",
+    ),
 ):
     """
     Install fonts from a GitHub release.
@@ -158,12 +163,19 @@ def install(
 
         # Select fonts in order of preference
         selected_fonts: list[Path] = []
-        if variable_ttfs:
+        if format == "variable-ttf":
             selected_fonts = variable_ttfs
-        elif otf_files:
+        elif format == "otf":
             selected_fonts = otf_files
-        elif static_ttfs:
+        elif format == "static-ttf":
             selected_fonts = static_ttfs
+        else:  # auto
+            if variable_ttfs:
+                selected_fonts = variable_ttfs
+            elif otf_files:
+                selected_fonts = otf_files
+            elif static_ttfs:
+                selected_fonts = static_ttfs
 
         if selected_fonts:
             with console.status("[bold green]Moving fonts..."):
