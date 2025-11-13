@@ -1,3 +1,4 @@
+import shutil
 import tarfile
 import tempfile
 import zipfile
@@ -107,34 +108,49 @@ def install(
 
     console.print(f"Found archive: {archive_name}")
 
-    extract_dir = Path.home() / "Desktop"
-    extract_dir.mkdir(exist_ok=True)
+    dest_dir = Path.home() / "Desktop"
+    dest_dir.mkdir(exist_ok=True)
 
-    with tempfile.NamedTemporaryFile(suffix=".archive", delete=False) as tmp_file:
-        tmp_path = Path(tmp_file.name)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        extract_dir = Path(temp_dir)
 
-        with console.status("[bold green]Downloading archive..."):
-            with httpx.stream("GET", archive_url, follow_redirects=True) as response:
-                response.raise_for_status()
-                with open(tmp_path, "wb") as f:
-                    for chunk in response.iter_bytes():
-                        f.write(chunk)
+        with tempfile.NamedTemporaryFile(
+            dir=temp_dir, suffix=".archive", delete=False
+        ) as tmp_file:
+            tmp_path = Path(tmp_file.name)
 
-        console.print("Download complete.")
+            with console.status("[bold green]Downloading archive..."):
+                with httpx.stream(
+                    "GET", archive_url, follow_redirects=True
+                ) as response:
+                    response.raise_for_status()
+                    with open(tmp_path, "wb") as f:
+                        for chunk in response.iter_bytes():
+                            f.write(chunk)
 
-        with console.status("[bold green]Extracting..."):
-            if archive_ext == ".zip":
-                with zipfile.ZipFile(tmp_path, "r") as archive_ref:
-                    archive_ref.extractall(extract_dir)
-            else:
-                # For tar archives
-                mode = "r:xz" if archive_ext == ".tar.xz" else "r:gz"
-                with tarfile.open(tmp_path, mode) as archive_ref:
-                    archive_ref.extractall(extract_dir)
+            console.print("Download complete.")
 
-        tmp_path.unlink()  # Clean up temp file
+            with console.status("[bold green]Extracting..."):
+                if archive_ext == ".zip":
+                    with zipfile.ZipFile(tmp_path, "r") as archive_ref:
+                        archive_ref.extractall(extract_dir)
+                else:
+                    # For tar archives
+                    mode = "r:xz" if archive_ext == ".tar.xz" else "r:gz"
+                    with tarfile.open(tmp_path, mode) as archive_ref:
+                        archive_ref.extractall(extract_dir)
 
-    console.print(f"[green]Fonts extracted to: {extract_dir}[/green]")
+        # Find all .otf files
+        otf_files = list(extract_dir.rglob("*.otf"))
+        if otf_files:
+            with console.status("[bold green]Moving fonts..."):
+                for otf_file in otf_files:
+                    shutil.move(str(otf_file), str(dest_dir / otf_file.name))
+            console.print(
+                f"[green]Moved {len(otf_files)} font(s) to: {dest_dir}[/green]"
+            )
+        else:
+            console.print("[yellow]No .otf files found in the archive.[/yellow]")
 
 
 @app.command()
