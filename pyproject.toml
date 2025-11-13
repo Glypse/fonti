@@ -11,6 +11,7 @@ dependencies = [
     "rich>=14.0.0",
     "pyinstaller>=6.16.0",
     "fonttools>=4.60.1",
+    "brotli>=1.2.0",
 ]
 
 [project.optional-dependencies]
