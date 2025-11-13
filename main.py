@@ -218,9 +218,10 @@ def install(
                 with console.status("[bold green]Moving fonts..."):
                     for font_file in selected_fonts:
                         shutil.move(str(font_file), str(dest_dir / font_file.name))
+                number_selected_fonts = len(selected_fonts)
                 console.print(
-                    f"[green]Moved {len(selected_fonts)} font(s) from {repo_arg} "
-                    f"to: {dest_dir}[/green]"
+                    f"[green]Moved {number_selected_fonts} font{'' if number_selected_fonts == 1 else 's'} from "
+                    f"{repo_arg} to: {dest_dir}[/green]"
                 )
             else:
                 msg = f"[yellow]No font files found in the archive for {repo_arg}.[/yellow]"
