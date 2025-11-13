@@ -63,6 +63,15 @@ def install(
     """
     Install fonts from a GitHub release.
     """
+    priorities = [p.strip() for p in format.split(",")]
+    valid_formats = ["variable-ttf", "otf", "static-ttf"]
+    if not priorities or not all(p in valid_formats for p in priorities):
+        console.print(
+            "[red]Invalid --format value. Must be comma-separated list of: "
+            f"{', '.join(valid_formats)}[/red]"
+        )
+        raise typer.Exit(1)
+
     try:
         owner, repo_name = repo.split("/")
     except ValueError as err:
