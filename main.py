@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 
 import httpx
 import typer
-from fontTools.ttLib import TTFont
+from fontTools.ttLib import TTFont  # type: ignore
 from rich.console import Console
 
 app = typer.Typer()
