@@ -17,6 +17,7 @@ console = Console()
 
 # Load default format from config file
 default_priorities = ["variable-ttf", "otf", "static-ttf"]
+default_path = Path.home() / "Desktop"
 config_file = Path.home() / ".fontpm"
 if config_file.exists():
     try:
@@ -32,6 +33,10 @@ if config_file.exists():
                         p in ["variable-ttf", "otf", "static-ttf"] for p in priorities
                     ):
                         default_priorities = priorities
+                elif line.startswith("path="):
+                    value = line.split("=", 1)[1].strip()
+                    if value:
+                        default_path = Path(value)
     except Exception:
         pass  # Ignore config errors
 
@@ -81,7 +86,7 @@ def install(
         )
         raise typer.Exit(1)
 
-    dest_dir = Path.cwd() if local else Path.home() / "Desktop"
+    dest_dir = Path.cwd() if local else default_path
     dest_dir.mkdir(exist_ok=True)
 
     # Function to get base name and extension
@@ -245,21 +250,41 @@ def config(
     """
     Set configuration options.
     """
+    # Load existing config
+    current_config: Dict[str, str] = {}
+    if config_file.exists():
+        try:
+            with open(config_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if "=" in line:
+                        k, v = line.split("=", 1)
+                        current_config[k] = v
+        except Exception:
+            pass  # Ignore read errors
+
     if key == "format":
         priorities = [p.strip() for p in value.split(",")]
         if not all(p in ["variable-ttf", "otf", "static-ttf"] for p in priorities):
             console.print(f"[red]Invalid format values: {value}[/red]")
             raise typer.Exit(1)
-        try:
-            with open(config_file, "w") as f:
-                f.write(f"format={value}\n")
-            console.print(f"[green]Set default format to: {value}[/green]")
-        except Exception as e:
-            console.print(f"[red]Error writing config: {e}[/red]")
-            raise typer.Exit(1) from e
+        current_config["format"] = value
+        console.print(f"[green]Set default format to: {value}[/green]")
+    elif key == "path":
+        current_config["path"] = value
+        console.print(f"[green]Set default path to: {value}[/green]")
     else:
         console.print(f"[red]Unknown config key: {key}[/red]")
         raise typer.Exit(1)
+
+    # Write back all config
+    try:
+        with open(config_file, "w") as f:
+            for k, v in current_config.items():
+                f.write(f"{k}={v}\n")
+    except Exception as e:
+        console.print(f"[red]Error writing config: {e}[/red]")
+        raise typer.Exit(1) from e
 
 
 @app.command()
