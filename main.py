@@ -1,7 +1,9 @@
+import tarfile
 import tempfile
 import zipfile
+from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, TypedDict
 
 import httpx
 import typer
@@ -10,6 +12,12 @@ from rich.console import Console
 
 app = typer.Typer()
 console = Console()
+
+
+class Asset(TypedDict):
+    name: str
+    size: int
+    browser_download_url: str
 
 
 def is_variable_font(font_path: str) -> bool:
@@ -47,26 +55,66 @@ def install(
         response.raise_for_status()
         release_data: Dict[str, Any] = response.json()
 
-    assets: List[Dict[str, Any]] = release_data.get("assets", [])
-    zip_assets = [a for a in assets if a["name"].endswith(".zip")]
-    if not zip_assets:
-        console.print("[red]No .zip asset found in the release.[/red]")
+    assets: List[Asset] = release_data.get("assets", [])
+    archive_extensions = [".zip", ".tar.xz", ".tar.gz", ".tgz"]
+    archives = [
+        a for a in assets if any(a["name"].endswith(ext) for ext in archive_extensions)
+    ]
+    if not archives:
+        console.print("[red]No archive asset found in the release.[/red]")
         raise typer.Exit(1)
 
-    zip_asset = zip_assets[0]  # Take the first one
-    zip_url: str = zip_asset["browser_download_url"]
-    zip_name: str = zip_asset["name"]
+    # Function to get priority for extensions (lower is better)
+    def get_priority(ext: str) -> int:
+        priorities = {".tar.xz": 1, ".tar.gz": 2, ".tgz": 2, ".zip": 3}
+        return priorities.get(ext, 4)
 
-    console.print(f"Found zip: {zip_name}")
+    # Function to get base name and extension
+    def get_base_and_ext(name: str) -> tuple[str, str]:
+        for ext in archive_extensions:
+            if name.endswith(ext):
+                return name[: -len(ext)], ext
+        return name, ""
+
+    # Group archives by base name
+    groups: defaultdict[str, list[tuple[Asset, str]]] = defaultdict(list)
+    for a in archives:
+        base, ext = get_base_and_ext(a["name"])
+        groups[base].append((a, ext))
+
+    # Choose the best asset from each group
+    best_assets: list[Asset] = []
+    for items in groups.values():
+        if len(items) == 1:
+            best_assets.append(items[0][0])
+        else:
+            # Sort by size ascending, then by priority ascending
+            sorted_items = sorted(
+                items, key=lambda x: (x[0]["size"], get_priority(x[1]))
+            )
+            best_assets.append(sorted_items[0][0])
+
+    # If multiple groups, choose the overall best
+    if len(best_assets) > 1:
+        best_assets.sort(
+            key=lambda a: (a["size"], get_priority(get_base_and_ext(a["name"])[1]))
+        )
+
+    chosen_asset = best_assets[0]
+    archive_url: str = chosen_asset["browser_download_url"]
+    archive_name: str = chosen_asset["name"]
+    _, archive_ext = get_base_and_ext(archive_name)
+
+    console.print(f"Found archive: {archive_name}")
 
     extract_dir = Path.home() / "Desktop"
     extract_dir.mkdir(exist_ok=True)
 
-    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp_file:
+    with tempfile.NamedTemporaryFile(suffix=".archive", delete=False) as tmp_file:
         tmp_path = Path(tmp_file.name)
 
-        with console.status("[bold green]Downloading zip..."):
-            with httpx.stream("GET", zip_url, follow_redirects=True) as response:
+        with console.status("[bold green]Downloading archive..."):
+            with httpx.stream("GET", archive_url, follow_redirects=True) as response:
                 response.raise_for_status()
                 with open(tmp_path, "wb") as f:
                     for chunk in response.iter_bytes():
@@ -75,8 +123,14 @@ def install(
         console.print("Download complete.")
 
         with console.status("[bold green]Extracting..."):
-            with zipfile.ZipFile(tmp_path, "r") as zip_ref:
-                zip_ref.extractall(extract_dir)
+            if archive_ext == ".zip":
+                with zipfile.ZipFile(tmp_path, "r") as archive_ref:
+                    archive_ref.extractall(extract_dir)
+            else:
+                # For tar archives
+                mode = "r:xz" if archive_ext == ".tar.xz" else "r:gz"
+                with tarfile.open(tmp_path, mode) as archive_ref:
+                    archive_ref.extractall(extract_dir)
 
         tmp_path.unlink()  # Clean up temp file
 
