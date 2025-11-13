@@ -15,6 +15,27 @@ app = typer.Typer()
 console = Console()
 
 
+# Load default format from config file
+default_priorities = ["variable-ttf", "otf", "static-ttf"]
+config_file = Path.home() / ".fontpm"
+if config_file.exists():
+    try:
+        with open(config_file) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("format="):
+                    value = line.split("=", 1)[1].strip()
+                    if value == "auto":
+                        continue
+                    priorities = [p.strip() for p in value.split(",")]
+                    if all(
+                        p in ["variable-ttf", "otf", "static-ttf"] for p in priorities
+                    ):
+                        default_priorities = priorities
+    except Exception:
+        pass  # Ignore config errors
+
+
 class Asset(TypedDict):
     name: str
     size: int
@@ -34,9 +55,9 @@ def install(
     repo: str = typer.Argument(..., help="GitHub repository in format owner/repo"),
     release: str = typer.Argument("latest", help="Release tag"),
     format: str = typer.Option(
-        "auto",
-        help="Font format to prefer: auto (default priority), "
-        "variable-ttf, otf, static-ttf",
+        ",".join(default_priorities),
+        help="Comma-separated list of font formats to prefer in order "
+        "(variable-ttf, otf, static-ttf)",
     ),
 ):
     """
@@ -163,19 +184,17 @@ def install(
 
         # Select fonts in order of preference
         selected_fonts: list[Path] = []
-        if format == "variable-ttf":
-            selected_fonts = variable_ttfs
-        elif format == "otf":
-            selected_fonts = otf_files
-        elif format == "static-ttf":
-            selected_fonts = static_ttfs
-        else:  # auto
-            if variable_ttfs:
+        priorities = [p.strip() for p in format.split(",")]
+        for pri in priorities:
+            if pri == "variable-ttf" and variable_ttfs:
                 selected_fonts = variable_ttfs
-            elif otf_files:
+                break
+            elif pri == "otf" and otf_files:
                 selected_fonts = otf_files
-            elif static_ttfs:
+                break
+            elif pri == "static-ttf" and static_ttfs:
                 selected_fonts = static_ttfs
+                break
 
         if selected_fonts:
             with console.status("[bold green]Moving fonts..."):
@@ -186,6 +205,33 @@ def install(
             )
         else:
             console.print("[yellow]No font files found in the archive.[/yellow]")
+
+
+@app.command()
+def config(
+    key: str = typer.Argument(..., help="Configuration key"),
+    value: str = typer.Argument(
+        ..., help="Configuration value (comma-separated for format)"
+    ),
+):
+    """
+    Set configuration options.
+    """
+    if key == "format":
+        priorities = [p.strip() for p in value.split(",")]
+        if not all(p in ["variable-ttf", "otf", "static-ttf"] for p in priorities):
+            console.print(f"[red]Invalid format values: {value}[/red]")
+            raise typer.Exit(1)
+        try:
+            with open(config_file, "w") as f:
+                f.write(f"format={value}\n")
+            console.print(f"[green]Set default format to: {value}[/green]")
+        except Exception as e:
+            console.print(f"[red]Error writing config: {e}[/red]")
+            raise typer.Exit(1) from e
+    else:
+        console.print(f"[red]Unknown config key: {key}[/red]")
+        raise typer.Exit(1)
 
 
 @app.command()
