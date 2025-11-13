@@ -140,17 +140,40 @@ def install(
                     with tarfile.open(tmp_path, mode) as archive_ref:
                         archive_ref.extractall(extract_dir)
 
-        # Find all .otf files
+        # Find all font files
+        ttf_files = list(extract_dir.rglob("*.ttf"))
         otf_files = list(extract_dir.rglob("*.otf"))
-        if otf_files:
+
+        variable_ttfs: list[Path] = []
+        static_ttfs: list[Path] = []
+        for ttf in ttf_files:
+            try:
+                if is_variable_font(str(ttf)):
+                    variable_ttfs.append(ttf)
+                else:
+                    static_ttfs.append(ttf)
+            except Exception:
+                # If can't check, treat as static
+                static_ttfs.append(ttf)
+
+        # Select fonts in order of preference
+        selected_fonts: list[Path] = []
+        if variable_ttfs:
+            selected_fonts = variable_ttfs
+        elif otf_files:
+            selected_fonts = otf_files
+        elif static_ttfs:
+            selected_fonts = static_ttfs
+
+        if selected_fonts:
             with console.status("[bold green]Moving fonts..."):
-                for otf_file in otf_files:
-                    shutil.move(str(otf_file), str(dest_dir / otf_file.name))
+                for font_file in selected_fonts:
+                    shutil.move(str(font_file), str(dest_dir / font_file.name))
             console.print(
-                f"[green]Moved {len(otf_files)} font(s) to: {dest_dir}[/green]"
+                f"[green]Moved {len(selected_fonts)} font(s) to: {dest_dir}[/green]"
             )
         else:
-            console.print("[yellow]No .otf files found in the archive.[/yellow]")
+            console.print("[yellow]No font files found in the archive.[/yellow]")
 
 
 @app.command()
