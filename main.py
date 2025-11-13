@@ -55,11 +55,18 @@ def install(
     repo: List[str] = typer.Argument(  # noqa: B008
         ..., help="GitHub repository in format owner/repo"
     ),
-    release: str = typer.Option("latest", help="Release tag"),
+    release: str = typer.Option("latest", "--release", "-r", help="Release tag"),
     format: str = typer.Option(
         ",".join(default_priorities),
-        help="Comma-separated list of font formats to prefer in order "
-        "(variable-ttf, otf, static-ttf)",
+        "--format",
+        "-f",
+        help="Comma-separated list of font formats to prefer in order",
+    ),
+    local: bool = typer.Option(
+        False,
+        "--local",
+        "-l",
+        help="Install fonts to current directory instead of default",
     ),
 ):
     """
@@ -74,7 +81,7 @@ def install(
         )
         raise typer.Exit(1)
 
-    dest_dir = Path.home() / "Desktop"
+    dest_dir = Path.cwd() if local else Path.home() / "Desktop"
     dest_dir.mkdir(exist_ok=True)
 
     # Function to get base name and extension
