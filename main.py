@@ -5,10 +5,19 @@ from typing import Any, Dict, List
 
 import httpx
 import typer
+from fontTools.ttLib import TTFont
 from rich.console import Console
 
 app = typer.Typer()
 console = Console()
+
+
+def is_variable_font(font_path: str) -> bool:
+    """
+    Check if a font file is a variable font.
+    """
+    font = TTFont(font_path)
+    return "fvar" in font
 
 
 @app.command()
@@ -72,6 +81,23 @@ def install(
         tmp_path.unlink()  # Clean up temp file
 
     console.print(f"[green]Fonts extracted to: {extract_dir}[/green]")
+
+
+@app.command()
+def is_variable(
+    font_path: str = typer.Argument(..., help="Path to the font file to check"),
+):
+    """
+    Check if a font file is variable or static.
+    """
+    try:
+        if is_variable_font(font_path):
+            console.print("This is a variable font.")
+        else:
+            console.print("This is a static font.")
+    except Exception as e:
+        console.print(f"[red]Error checking font: {e}[/red]")
+        raise typer.Exit(1) from e
 
 
 if __name__ == "__main__":
