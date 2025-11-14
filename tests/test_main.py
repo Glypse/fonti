@@ -1306,10 +1306,16 @@ class TestFix:
                 }
             },
         }
-        with patch("main.load_installed_data", return_value=installed_data):
-            result = runner.invoke(app, ["fix"])
+        with (
+            patch("main.load_installed_data", return_value=installed_data),
+            patch("main.install_single_repo", return_value=None),
+        ):
+            result = runner.invoke(app, ["fix"], input="n\n")
             assert result.exit_code == 0
-            assert "No issues found." in result.output
+            assert "Found 2 issue(s):" in result.output
+            assert "Reinstall repo (missing file(s)): owner1/repo1" in result.output
+            assert "Reinstall repo (missing file(s)): owner2/repo2" in result.output
+            assert "Aborted." in result.output
 
     @patch("main.save_installed_data")
     def test_fix_with_duplicates(self, mock_save: MagicMock, runner: CliRunner) -> None:
@@ -1339,18 +1345,27 @@ class TestFix:
                 }
             },
         }
-        with patch("main.load_installed_data", return_value=installed_data):
+        with (
+            patch("main.load_installed_data", return_value=installed_data),
+            patch("main.install_single_repo", return_value=None),
+        ):
             result = runner.invoke(app, ["fix"], input="y\n")
             assert result.exit_code == 0
-            assert "Found 1 issue(s):" in result.output
+            assert "Found 3 issue(s):" in result.output
             assert "Remove duplicate font1.ttf from owner2/repo2" in result.output
+            assert "Reinstall repo (missing file(s)): owner1/repo1" in result.output
+            assert "Reinstall repo (missing file(s)): owner3/repo3" in result.output
             assert "Proceed with fixes?" in result.output
             assert "Removed duplicate font1.ttf from owner2/repo2" in result.output
-            assert "Fixed 1 issue(s)." in result.output
+            assert "Reinstalled repo (missing file(s)): owner1/repo1" in result.output
+            assert "Reinstalled repo (missing file(s)): owner3/repo3" in result.output
+            assert "Fixed 3 issue(s)." in result.output
             mock_save.assert_called_once()
-            # Check that repo2 is removed
+            # Check that repos are present (reinstalled)
             saved_data = mock_save.call_args[0][0]
-            assert "repo2" not in saved_data
+            assert "owner1/repo1" in saved_data
+            assert "owner2/repo2" not in saved_data
+            assert "owner3/repo3" in saved_data
 
     @patch("main.save_installed_data")
     def test_fix_invalid_repo(self, mock_save: MagicMock, runner: CliRunner) -> None:
@@ -1372,14 +1387,19 @@ class TestFix:
                 }
             },
         }
-        with patch("main.load_installed_data", return_value=installed_data):
+        with (
+            patch("main.load_installed_data", return_value=installed_data),
+            patch("main.install_single_repo", return_value=None),
+        ):
             result = runner.invoke(app, ["fix"], input="y\n")
             assert result.exit_code == 0
-            assert "Found 1 issue(s):" in result.output
+            assert "Found 2 issue(s):" in result.output
             assert "Remove invalid repo: invalidrepo" in result.output
+            assert "Reinstall repo (missing file(s)): owner/repo" in result.output
             assert "Proceed with fixes?" in result.output
             assert "Removed invalid repo: invalidrepo" in result.output
-            assert "Fixed 1 issue(s)." in result.output
+            assert "Reinstalled repo (missing file(s)): owner/repo" in result.output
+            assert "Fixed 2 issue(s)." in result.output
             mock_save.assert_called_once()
             saved_data = mock_save.call_args[0][0]
             assert "invalidrepo" not in saved_data
@@ -1403,19 +1423,25 @@ class TestFix:
                 },
             },
         }
-        with patch("main.load_installed_data", return_value=installed_data):
+        with (
+            patch("main.load_installed_data", return_value=installed_data),
+            patch("main.install_single_repo", return_value=None),
+        ):
             result = runner.invoke(app, ["fix"], input="y\n")
             assert result.exit_code == 0
-            assert "Found 1 issue(s):" in result.output
+            assert "Found 2 issue(s):" in result.output
             assert (
                 "Remove invalid entry: owner/repo/font1.ttf (type/extension mismatch)"
                 in result.output
             )
+            assert "Reinstall repo (missing file(s)): owner/repo" in result.output
             assert "Proceed with fixes?" in result.output
             assert "Removed invalid entry: owner/repo/font1.ttf" in result.output
-            assert "Fixed 1 issue(s)." in result.output
+            assert "Reinstalled repo (missing file(s)): owner/repo" in result.output
+            assert "Fixed 2 issue(s)." in result.output
             mock_save.assert_called_once()
             saved_data = mock_save.call_args[0][0]
+            assert "owner/repo" in saved_data
             assert "font1.ttf" not in saved_data["owner/repo"]
             assert "font2.otf" in saved_data["owner/repo"]
 
@@ -1439,11 +1465,15 @@ class TestFix:
                 }
             },
         }
-        with patch("main.load_installed_data", return_value=installed_data):
+        with (
+            patch("main.load_installed_data", return_value=installed_data),
+            patch("main.install_single_repo", return_value=None),
+        ):
             result = runner.invoke(app, ["fix"], input="n\n")
             assert result.exit_code == 0
-            assert "Found 1 issue(s):" in result.output
+            assert "Found 2 issue(s):" in result.output
             assert "Remove duplicate font1.ttf from owner2/repo2" in result.output
+            assert "Reinstall repo (missing file(s)): owner1/repo1" in result.output
             assert "Proceed with fixes?" in result.output
             assert "Aborted." in result.output
             mock_save.assert_not_called()
@@ -1468,10 +1498,14 @@ class TestFix:
         with (
             patch("main.load_installed_data", return_value=installed_data),
             patch("main.INSTALLED_FILE", installed_file),
+            patch("main.install_single_repo", return_value=None),
         ):
-            result = runner.invoke(app, ["fix", "--backup"])
+            result = runner.invoke(app, ["fix", "--backup"], input="n\n")
             assert result.exit_code == 0
             assert "Backup created:" in result.output
+            assert "Found 1 issue(s):" in result.output
+            assert "Reinstall repo (missing file(s)): owner/repo" in result.output
+            assert "Aborted." in result.output
             mock_copy.assert_called_once_with(
                 installed_file, installed_file.with_suffix(".json.backup")
             )
@@ -1498,12 +1532,113 @@ class TestFix:
                 }
             },
         }
-        with patch("main.load_installed_data", return_value=installed_data):
-            result = runner.invoke(app, ["fix", "--granular"], input="y\n")
+        with (
+            patch("main.load_installed_data", return_value=installed_data),
+            patch("main.install_single_repo", return_value=None),
+        ):
+            result = runner.invoke(app, ["fix", "--granular"], input="y\ny\n")
             assert result.exit_code == 0
             assert "Remove duplicate font1.ttf from owner2/repo2" in result.output
             assert "Fix this?" in result.output
             assert "Removed duplicate font1.ttf from owner2/repo2" in result.output
+            assert "Reinstall repo (missing file(s)): owner1/repo1" in result.output
+            assert "Fixed 2 issue(s)." in result.output
+            mock_save.assert_called_once()
+
+    @patch("main.save_installed_data")
+    def test_fix_missing_file(self, mock_save: MagicMock, runner: CliRunner) -> None:
+        installed_data = {
+            "owner/repo": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash1",
+                    "type": "static-ttf",
+                    "version": "1.0",
+                }
+            }
+        }
+        with (
+            patch("main.load_installed_data", return_value=installed_data),
+            patch("main.default_path", Path("/fake/path")),
+            patch("pathlib.Path.exists", return_value=False),
+            patch("main.install_single_repo", return_value=None),
+        ):
+            result = runner.invoke(app, ["fix"], input="y\n")
+            assert result.exit_code == 0
+            assert "Found 1 issue(s):" in result.output
+            assert "Reinstall repo (missing file(s)): owner/repo" in result.output
+            assert "Proceed with fixes?" in result.output
+            assert "Reinstalled repo (missing file(s)): owner/repo" in result.output
+            assert "Fixed 1 issue(s)." in result.output
+            mock_save.assert_called_once()
+
+    @patch("main.save_installed_data")
+    def test_fix_invalid_font_file(
+        self, mock_save: MagicMock, runner: CliRunner
+    ) -> None:
+        installed_data = {
+            "owner/repo": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash1",
+                    "type": "static-ttf",
+                    "version": "1.0",
+                }
+            }
+        }
+        with (
+            patch("main.load_installed_data", return_value=installed_data),
+            patch("main.default_path", Path("/fake/path")),
+            patch("pathlib.Path.exists", return_value=True),
+            patch("main.TTFont", side_effect=Exception("Invalid font")),
+            patch("main.install_single_repo", return_value=None),
+        ):
+            result = runner.invoke(app, ["fix"], input="y\n")
+            assert result.exit_code == 0
+            assert "Found 1 issue(s):" in result.output
+            assert "Reinstall repo (invalid font file(s)): owner/repo" in result.output
+            assert "Proceed with fixes?" in result.output
+            assert (
+                "Reinstalled repo (invalid font file(s)): owner/repo" in result.output
+            )
+            assert "Fixed 1 issue(s)." in result.output
+            mock_save.assert_called_once()
+
+    @patch("main.save_installed_data")
+    def test_fix_variable_mismatch(
+        self, mock_save: MagicMock, runner: CliRunner
+    ) -> None:
+        installed_data = {
+            "owner/repo": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash1",
+                    "type": "variable-ttf",
+                    "version": "1.0",
+                }
+            }
+        }
+        with (
+            patch("main.load_installed_data", return_value=installed_data),
+            patch("main.default_path", Path("/fake/path")),
+            patch("pathlib.Path.exists", return_value=True),
+            patch("main.TTFont", return_value=MagicMock()),
+            patch(
+                "main.is_variable_font", return_value=False
+            ),  # Expected variable but is static
+            patch("main.install_single_repo", return_value=None),
+        ):
+            result = runner.invoke(app, ["fix"], input="y\n")
+            assert result.exit_code == 0
+            assert "Found 1 issue(s):" in result.output
+            assert (
+                "Reinstall repo (variable/static mismatch): owner/repo" in result.output
+            )
+            assert "Proceed with fixes?" in result.output
+            assert (
+                "Reinstalled repo (variable/static mismatch): owner/repo"
+                in result.output
+            )
             assert "Fixed 1 issue(s)." in result.output
             mock_save.assert_called_once()
 

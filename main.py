@@ -1186,13 +1186,11 @@ def fix(
     def del_repo(repo: str) -> int:
         font_count = len(installed_data[repo])
         del installed_data[repo]
-        console.print(f"[green]Removed invalid repo: {repo}[/green]")
         return font_count
 
     def del_entry(repo: str, filename: str) -> int:
         if repo in installed_data and filename in installed_data[repo]:
             del installed_data[repo][filename]
-            console.print(f"[green]Removed invalid entry: {repo}/{filename}[/green]")
             # If repo now empty, remove it
             if not installed_data[repo]:
                 del installed_data[repo]
@@ -1203,7 +1201,6 @@ def fix(
     def del_duplicate(repo: str, filename: str) -> int:
         if repo in installed_data and filename in installed_data[repo]:
             del installed_data[repo][filename]
-            console.print(f"[green]Removed duplicate {filename} from {repo}[/green]")
             # If repo now empty, remove it
             if not installed_data[repo]:
                 del installed_data[repo]
@@ -1211,9 +1208,35 @@ def fix(
             return 1
         return 0
 
+    def update_hash(repo: str, filename: str, new_hash: str) -> int:
+        if repo in installed_data and filename in installed_data[repo]:
+            installed_data[repo][filename]["hash"] = new_hash
+            return 1
+        return 0
+
+    def reinstall_repo(repo: str) -> int:
+        try:
+            owner, repo_name = parse_repo(repo)
+            install_single_repo(
+                owner,
+                repo_name,
+                "latest",
+                default_priorities,
+                default_path,
+                False,
+                True,
+                [],
+                ["roman", "italic"],
+            )
+            return 1
+        except Exception as e:
+            console.print(f"[red]Failed to reinstall {repo}: {e}[/red]")
+            return 0
+
     actions: List[Tuple[str, Callable[[], int]]] = []
     invalid_repos: List[str] = []
     invalid_entries: List[Tuple[str, str]] = []
+    repos_to_reinstall: Dict[str, str] = {}
 
     # Detect invalid repos
     invalid_repos = []
@@ -1274,6 +1297,54 @@ def fix(
                 )
             )
 
+    # Detect file issues
+    for repo, fonts in installed_data.items():
+        if repo in invalid_repos:
+            continue
+        for filename, entry in fonts.items():
+            if (repo, filename) in invalid_entries:
+                continue
+            # Check if it's a duplicate to be removed
+            is_duplicate_to_remove = any(
+                repo == r and filename == f
+                for f, repos in duplicates.items()
+                for r in repos[1:]
+            )
+            if is_duplicate_to_remove:
+                continue
+            file_path = default_path / filename
+            if not file_path.exists():
+                repos_to_reinstall[repo] = "missing file(s)"
+            else:
+                # Validate font
+                try:
+                    TTFont(str(file_path))
+                    is_var = is_variable_font(str(file_path))
+                    expected_var = entry["type"].startswith("variable-")
+                    if expected_var != is_var:
+                        repos_to_reinstall[repo] = "variable/static mismatch"
+                        continue
+                except Exception:
+                    repos_to_reinstall[repo] = "invalid font file(s)"
+                    continue
+                # If valid, check hash
+                try:
+                    current_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+                    if current_hash != entry["hash"]:
+                        actions.append(
+                            (
+                                f"Update hash for modified file: {repo}/{filename}",
+                                partial(update_hash, repo, filename, current_hash),
+                            )
+                        )
+                except Exception:
+                    repos_to_reinstall[repo] = "unreadable file(s)"
+
+    for repo, reason in sorted(repos_to_reinstall.items()):
+        actions.append(
+            (f"Reinstall repo ({reason}): {repo}", partial(reinstall_repo, repo))
+        )
+
     if not actions:
         console.print("[green]No issues found.[/green]")
         return
@@ -1285,6 +1356,12 @@ def fix(
             console.print(f"[yellow]{message}[/yellow]")
             if typer.confirm("Fix this?", default=True):
                 fixed_count += action()
+                replaced_message = (
+                    message.replace("Remove", "Removed")
+                    .replace("Update", "Updated")
+                    .replace("Reinstall", "Reinstalled")
+                )
+                console.print(f"[green]{replaced_message}[/green]")
     else:
         console.print(f"[yellow]Found {len(actions)} issue(s):[/yellow]")
         for message, _ in actions:
@@ -1294,8 +1371,14 @@ def fix(
             console.print("[blue]Aborted.[/blue]")
             return
 
-        for _, action in actions:
+        for message, action in actions:
             fixed_count += action()
+            replaced_message = (
+                message.replace("Remove", "Removed")
+                .replace("Update", "Updated")
+                .replace("Reinstall", "Reinstalled")
+            )
+            console.print(f"[green]{replaced_message}[/green]")
 
     save_installed_data(installed_data)
     console.print(f"[green]Fixed {fixed_count} issue(s).[/green]")
