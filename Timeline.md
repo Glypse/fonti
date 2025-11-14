@@ -5,13 +5,12 @@
 -   [x] Install GitHub fonts through the `install user/repo version` syntax
 -   [x] Remove fonts installed **via fontpm only** through the `uninstall user/repo` syntax
 -   [x] Updates fonts installed **via fontpm only** through the `update` syntax
--   [ ] Changelog preview
 -   [x] Support for non-global installations (example use case: woff2 install insisde of a web app repo)
 -   [x] Enable importing/exporting `fontpm-fonts.json`
 -   [x] Specify selected weight(s)
--   [ ] Caching
+-   [x] Caching
     -   [ ] --info flag for the font before install
-    -   [ ] When local install/import, check if the font files aren't already cached or installed on the system; use those by preference
+    -   [x] When local install/import, check if the font files aren't already cached or installed on the system; use those by preference
 -   [ ] GitHub auth
 -   [ ] `fix` command to repair broken `installed.json` files (duplicates, etc)
 -   [ ] Allow to see changelog

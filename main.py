@@ -589,7 +589,6 @@ def install_single_repo(
     dest_dir: Path,
     local: bool,
     force: bool,
-    keep_multiple: bool,
     weights: List[int],
     styles: List[str],
 ) -> None:
@@ -624,27 +623,21 @@ def install_single_repo(
         )
         return
 
-    # Check if already installed
+    # Remove old fonts if any
     if not local:
         installed_data = load_installed_data()
-        if repo_arg in installed_data and installed_data[repo_arg] and not force:
-            console.print(
-                f"[yellow]Already installed from {repo_arg}. "
-                "Use --force to reinstall or change version.[/yellow]"
-            )
-            return
-
-        installed_types = [
-            entry.get("type")
-            for entry in installed_data.get(repo_arg, {}).values()
-            if "type" in entry
-        ]
-        if installed_types and not keep_multiple and not force:
-            console.print(
-                f"[yellow]Already installed other types from {repo_arg}. "
-                "Use --keep-multiple to install additional types or --force to overwrite.[/yellow]"
-            )
-            return
+        if repo_arg in installed_data:
+            fonts = installed_data[repo_arg]
+            for font_info in fonts.values():
+                filename = font_info["filename"]
+                font_path = dest_dir / filename
+                if font_path.exists():
+                    try:
+                        font_path.unlink()
+                    except Exception as e:
+                        console.print(f"[red]Could not delete {filename}: {e}[/red]")
+            del installed_data[repo_arg]
+            save_installed_data(installed_data)
 
     extract_dir = None
     try:
@@ -706,21 +699,6 @@ def install_single_repo(
             categorized_fonts, priorities, weights, styles
         )
 
-        # Check for type conflict
-        if selected_fonts and not local:
-            installed_data = load_installed_data()
-            installed_types = [
-                entry.get("type")
-                for entry in installed_data.get(repo_arg, {}).values()
-                if "type" in entry
-            ]
-            if selected_pri in installed_types and not force:
-                console.print(
-                    f"[yellow]Already installed {selected_pri} from {repo_arg}. "
-                    "Use --force to reinstall.[/yellow]"
-                )
-                return
-
         install_fonts(selected_fonts, dest_dir, repo_arg, version, selected_pri, local)
 
     except Exception as e:
@@ -751,12 +729,6 @@ def install(
     ),
     force: bool = typer.Option(
         False, "--force", help="Force reinstall even if already installed"
-    ),
-    keep_multiple: bool = typer.Option(
-        False,
-        "--keep-multiple",
-        "-km",
-        help="Allow installing multiple font types from the same repo",
     ),
     weights: str = typer.Option(
         "",
@@ -831,7 +803,6 @@ def install(
             dest_dir,
             local,
             force,
-            keep_multiple,
             parsed_weights,
             parsed_styles,
         )
@@ -1063,7 +1034,6 @@ def update(
             default_path,
             False,
             True,
-            True,
             [],
             ["roman", "italic"],
         )
@@ -1154,10 +1124,8 @@ def import_fonts(
         types = list({entry["type"] for entry in fonts.values()})
         # Assume all have same version
         version = list(fonts.values())[0]["version"]
-        # Set priorities to include all types
-        priorities = types  # Order doesn't matter much, as we use keep_multiple
-
-        keep_multiple = len(types) > 1
+        # Set priorities to the first type
+        priorities = [types[0]] if types else []
 
         try:
             owner, repo_name = repo.split("/")
@@ -1173,7 +1141,6 @@ def import_fonts(
             Path.cwd() if local else default_path,
             local,
             force,
-            keep_multiple,
             [],
             ["roman", "italic"],
         )

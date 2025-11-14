@@ -221,7 +221,6 @@ class TestImport:
                 Path("/fake/path"),
                 False,
                 False,
-                False,
                 [],
                 ["roman", "italic"],
             )
@@ -423,7 +422,6 @@ class TestUpdate:
                 Path("/fake/path"),
                 False,
                 True,
-                True,
                 [],
                 ["roman", "italic"],
             )
@@ -524,7 +522,6 @@ class TestUpdate:
                 Path("/fake/path"),
                 False,
                 True,
-                True,
                 [],
                 ["roman", "italic"],
             )
@@ -611,7 +608,6 @@ class TestUpdate:
                 Path("/fake/path"),
                 False,
                 True,
-                True,
                 [],
                 ["roman", "italic"],
             )
@@ -630,7 +626,6 @@ class TestInstall:
             "latest",
             ["variable-ttf", "otf", "static-ttf"],
             Path("/Users/sacha/Library/Fonts"),
-            False,
             False,
             False,
             [],
@@ -661,7 +656,6 @@ class TestInstall:
             Path("/Users/sacha/Library/Fonts"),
             False,
             True,  # force=True
-            False,
             [],
             ["roman", "italic"],
         )
@@ -680,26 +674,6 @@ class TestInstall:
             Path.cwd(),  # local=True so uses cwd
             True,  # local=True
             False,
-            False,
-            [],
-            ["roman", "italic"],
-        )
-
-    @patch("main.install_single_repo")
-    def test_install_with_keep_multiple(
-        self, mock_install: MagicMock, runner: CliRunner
-    ) -> None:
-        result = runner.invoke(app, ["install", "owner/repo", "--keep-multiple"])
-        assert result.exit_code == 0
-        mock_install.assert_called_once_with(
-            "owner",
-            "repo",
-            "latest",
-            ["variable-ttf", "otf", "static-ttf"],
-            Path("/Users/sacha/Library/Fonts"),
-            False,
-            False,
-            True,  # keep_multiple=True
             [],
             ["roman", "italic"],
         )
@@ -716,7 +690,6 @@ class TestInstall:
             "v1.0",  # release specified
             ["variable-ttf", "otf", "static-ttf"],
             Path("/Users/sacha/Library/Fonts"),
-            False,
             False,
             False,
             [],
@@ -739,7 +712,6 @@ class TestInstall:
             Path("/Users/sacha/Library/Fonts"),
             False,
             False,
-            False,
             [],
             ["roman", "italic"],
         )
@@ -756,7 +728,6 @@ class TestInstall:
             "latest",
             ["variable-ttf", "otf", "static-ttf"],
             Path("/Users/sacha/Library/Fonts"),
-            False,
             False,
             False,
             [400, 700],
@@ -777,7 +748,6 @@ class TestInstall:
             "latest",
             ["variable-ttf", "otf", "static-ttf"],
             Path("/Users/sacha/Library/Fonts"),
-            False,
             False,
             False,
             [400, 700],
@@ -801,7 +771,6 @@ class TestInstall:
             "latest",
             ["variable-ttf", "otf", "static-ttf"],
             Path("/Users/sacha/Library/Fonts"),
-            False,
             False,
             False,
             [],
@@ -1140,7 +1109,6 @@ class TestInstallSingleRepo:
             Path("/dest"),
             True,
             False,
-            False,
             [],
             ["roman", "italic"],
         )
@@ -1188,7 +1156,6 @@ class TestInstallSingleRepo:
             Path("/dest"),
             True,
             False,
-            False,
             [],
             ["roman", "italic"],
         )
@@ -1229,7 +1196,6 @@ class TestInstallSingleRepo:
             ["static-ttf"],
             Path("/dest"),
             True,
-            False,
             False,
             [],
             ["roman", "italic"],
