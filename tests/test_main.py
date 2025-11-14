@@ -1063,7 +1063,8 @@ class TestFontFunctions:
         assert assets == []
         assert body == ""
         mock_get.assert_called_once_with(
-            "https://api.github.com/repos/owner/repo/releases/latest"
+            "https://api.github.com/repos/owner/repo/releases/latest",
+            follow_redirects=True,
         )
 
     @patch("httpx.get")
@@ -1080,11 +1081,12 @@ class TestFontFunctions:
         assert assets == []
         assert body == ""
         mock_get.assert_called_once_with(
-            "https://api.github.com/repos/owner/repo/releases/tags/v2.0"
+            "https://api.github.com/repos/owner/repo/releases/tags/v2.0",
+            follow_redirects=True,
         )
 
-    @patch("shutil.copy")
     @patch("main.CACHE")
+    @patch("shutil.copy")
     @patch("pathlib.Path.stat")
     @patch("builtins.open")
     @patch("tempfile.NamedTemporaryFile")
@@ -1099,8 +1101,8 @@ class TestFontFunctions:
         mock_named_temp: MagicMock,
         mock_open: MagicMock,
         mock_stat: MagicMock,
-        mock_cache: MagicMock,
         _mock_copy: MagicMock,
+        mock_cache: MagicMock,
     ) -> None:
         from main import get_or_download_and_extract_archive
 

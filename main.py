@@ -249,7 +249,7 @@ def fetch_release_info(
     with console.status("[bold green]Fetching release info..."):
         if release == "latest":
             url = f"https://api.github.com/repos/{owner}/{repo_name}/releases/latest"
-            response = httpx.get(url)
+            response = httpx.get(url, follow_redirects=True)
             response.raise_for_status()
         else:
             release_tag = release
@@ -257,13 +257,13 @@ def fetch_release_info(
                 release_tag = f"v{release}"
             url = f"https://api.github.com/repos/{owner}/{repo_name}/releases/tags/{release_tag}"
             try:
-                response = httpx.get(url)
+                response = httpx.get(url, follow_redirects=True)
                 response.raise_for_status()
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 404 and not release.startswith("v"):
                     # Try without 'v'
                     url = f"https://api.github.com/repos/{owner}/{repo_name}/releases/tags/{release}"
-                    response = httpx.get(url)
+                    response = httpx.get(url, follow_redirects=True)
                     response.raise_for_status()
                 else:
                     raise
