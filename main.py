@@ -92,6 +92,22 @@ def install_single_repo(
     repo_arg = f"{owner}/{repo_name}"
     console.print(f"[bold]Installing from {repo_arg}...[/bold]")
 
+    if not local:
+        installed_file = Path.home() / ".fontpm" / "installed.json"
+        if installed_file.exists():
+            try:
+                with open(installed_file) as f:
+                    temp_data = json.load(f)
+                if repo_arg in temp_data and temp_data[repo_arg]:
+                    if not force:
+                        console.print(
+                            f"[yellow]Already installed from {repo_arg}. "
+                            "Use --force to reinstall or change version.[/yellow]"
+                        )
+                        return
+            except Exception:
+                pass
+
     with console.status("[bold green]Fetching release info..."):
         if release == "latest":
             url = f"https://api.github.com/repos/{owner}/{repo_name}/releases/latest"
@@ -283,7 +299,7 @@ def install_single_repo(
                     pass  # Ignore load errors
 
             repo_key = repo_arg
-            if repo_key not in installed_data:
+            if repo_key not in installed_data or force:
                 installed_data[repo_key] = []
             for font_file in selected_fonts:
                 try:
