@@ -5,8 +5,9 @@ import tarfile
 import tempfile
 import zipfile
 from collections import defaultdict
+from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, TypedDict
+from typing import Any, Callable, Dict, List, Tuple, TypedDict
 
 import httpx
 import typer
@@ -1159,7 +1160,10 @@ def import_fonts(
 @app.command()
 def fix(
     backup: bool = typer.Option(
-        False, "--backup", help="Create a backup of installed.json before fixing"
+        False, "--backup", "-b", help="Create a backup of installed.json before fixing"
+    ),
+    granular: bool = typer.Option(
+        False, "--granular", "-g", help="Ask for confirmation for each fix individually"
     ),
 ):
     """
@@ -1179,7 +1183,35 @@ def fix(
             console.print(f"[red]Failed to create backup: {e}[/red]")
             raise typer.Exit(1) from e
 
-    action_messages: List[str] = []
+    def del_repo(repo: str) -> int:
+        font_count = len(installed_data[repo])
+        del installed_data[repo]
+        console.print(f"[green]Removed invalid repo: {repo}[/green]")
+        return font_count
+
+    def del_entry(repo: str, filename: str) -> int:
+        if repo in installed_data and filename in installed_data[repo]:
+            del installed_data[repo][filename]
+            console.print(f"[green]Removed invalid entry: {repo}/{filename}[/green]")
+            # If repo now empty, remove it
+            if not installed_data[repo]:
+                del installed_data[repo]
+                console.print(f"[green]Removed empty repo {repo}[/green]")
+            return 1
+        return 0
+
+    def del_duplicate(repo: str, filename: str) -> int:
+        if repo in installed_data and filename in installed_data[repo]:
+            del installed_data[repo][filename]
+            console.print(f"[green]Removed duplicate {filename} from {repo}[/green]")
+            # If repo now empty, remove it
+            if not installed_data[repo]:
+                del installed_data[repo]
+                console.print(f"[green]Removed empty repo {repo}[/green]")
+            return 1
+        return 0
+
+    actions: List[Tuple[str, Callable[[], int]]] = []
     invalid_repos: List[str] = []
     invalid_entries: List[Tuple[str, str]] = []
 
@@ -1190,7 +1222,7 @@ def fix(
             parse_repo(repo)
         except ValueError:
             invalid_repos.append(repo)
-            action_messages.append(f"Remove invalid repo: {repo}")
+            actions.append((f"Remove invalid repo: {repo}", partial(del_repo, repo)))
 
     # Detect type/extension mismatches
     type_to_ext = {
@@ -1210,8 +1242,11 @@ def fix(
             expected_ext = type_to_ext.get(entry["type"])
             if expected_ext and not filename.endswith(expected_ext):
                 invalid_entries.append((repo, filename))
-                action_messages.append(
-                    f"Remove invalid entry: {repo}/{filename} (type/extension mismatch)"
+                actions.append(
+                    (
+                        f"Remove invalid entry: {repo}/{filename} (type/extension mismatch)",
+                        partial(del_entry, repo, filename),
+                    )
                 )
 
     # Detect duplicates: filename -> list of repos
@@ -1232,54 +1267,35 @@ def fix(
     # Collect actions for duplicates
     for filename, repos in duplicates.items():
         for repo in repos[1:]:
-            action_messages.append(f"Remove duplicate {filename} from {repo}")
+            actions.append(
+                (
+                    f"Remove duplicate {filename} from {repo}",
+                    partial(del_duplicate, repo, filename),
+                )
+            )
 
-    if not action_messages:
+    if not actions:
         console.print("[green]No issues found.[/green]")
         return
 
-    console.print(f"[yellow]Found {len(action_messages)} issue(s):[/yellow]")
-    for msg in action_messages:
-        console.print(f"  {msg}")
-
-    if not typer.confirm("Proceed with fixes?", default=True):
-        console.print("[blue]Aborted.[/blue]")
-        return
-
-    # Fix issues
     fixed_count = 0
 
-    # Remove invalid repos
-    for repo in invalid_repos:
-        font_count = len(installed_data[repo])
-        del installed_data[repo]
-        console.print(f"[green]Removed invalid repo: {repo}[/green]")
-        fixed_count += font_count
+    if granular:
+        for message, action in actions:
+            console.print(f"[yellow]{message}[/yellow]")
+            if typer.confirm("Fix this?", default=True):
+                fixed_count += action()
+    else:
+        console.print(f"[yellow]Found {len(actions)} issue(s):[/yellow]")
+        for message, _ in actions:
+            console.print(f"  {message}")
 
-    # Remove invalid entries
-    for repo, filename in invalid_entries:
-        if repo in installed_data and filename in installed_data[repo]:
-            del installed_data[repo][filename]
-            console.print(f"[green]Removed invalid entry: {repo}/{filename}[/green]")
-            fixed_count += 1
-            # If repo now empty, remove it
-            if not installed_data[repo]:
-                del installed_data[repo]
-                console.print(f"[green]Removed empty repo {repo}[/green]")
+        if not typer.confirm("Proceed with fixes?", default=True):
+            console.print("[blue]Aborted.[/blue]")
+            return
 
-    # Remove duplicates: keep in the first repo, remove from others
-    for filename, repos in duplicates.items():
-        for repo in repos[1:]:
-            if repo in installed_data and filename in installed_data[repo]:
-                del installed_data[repo][filename]
-                console.print(
-                    f"[green]Removed duplicate {filename} from {repo}[/green]"
-                )
-                fixed_count += 1
-                # If repo now empty, remove it
-                if not installed_data[repo]:
-                    del installed_data[repo]
-                    console.print(f"[green]Removed empty repo {repo}[/green]")
+        for _, action in actions:
+            fixed_count += action()
 
     save_installed_data(installed_data)
     console.print(f"[green]Fixed {fixed_count} issue(s).[/green]")

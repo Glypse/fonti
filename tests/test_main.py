@@ -1476,6 +1476,37 @@ class TestFix:
                 installed_file, installed_file.with_suffix(".json.backup")
             )
 
+    @patch("main.save_installed_data")
+    def test_fix_granular_duplicates(
+        self, mock_save: MagicMock, runner: CliRunner
+    ) -> None:
+        installed_data = {
+            "owner1/repo1": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash1",
+                    "type": "static-ttf",
+                    "version": "1.0",
+                }
+            },
+            "owner2/repo2": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash1",
+                    "type": "static-ttf",
+                    "version": "1.0",
+                }
+            },
+        }
+        with patch("main.load_installed_data", return_value=installed_data):
+            result = runner.invoke(app, ["fix", "--granular"], input="y\n")
+            assert result.exit_code == 0
+            assert "Remove duplicate font1.ttf from owner2/repo2" in result.output
+            assert "Fix this?" in result.output
+            assert "Removed duplicate font1.ttf from owner2/repo2" in result.output
+            assert "Fixed 1 issue(s)." in result.output
+            mock_save.assert_called_once()
+
 
 class TestCache:
     @patch("main.CACHE")
