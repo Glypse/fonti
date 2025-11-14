@@ -6,7 +6,7 @@ import tempfile
 import zipfile
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, TypedDict
+from typing import Any, Dict, List, Tuple, TypedDict
 
 import httpx
 import typer
@@ -27,6 +27,15 @@ class FontEntry(TypedDict):
     filename: str
     hash: str
     type: str
+    version: str
+
+
+def get_base_and_ext(name: str) -> tuple[str, str]:
+    archive_extensions = [".zip", ".tar.xz", ".tar.gz", ".tgz"]
+    for ext in archive_extensions:
+        if name.endswith(ext):
+            return name[: -len(ext)], ext
+    return name, ""
 
 
 # Load default format from config file
@@ -68,6 +77,251 @@ def is_variable_font(font_path: str) -> bool:
     """
     font = TTFont(font_path)
     return "fvar" in font
+
+
+def install_single_repo(
+    owner: str,
+    repo_name: str,
+    release: str,
+    priorities: list[str],
+    dest_dir: Path,
+    local: bool,
+    force: bool,
+    keep_multiple: bool,
+) -> None:
+    repo_arg = f"{owner}/{repo_name}"
+    console.print(f"[bold]Installing from {repo_arg}...[/bold]")
+
+    with console.status("[bold green]Fetching release info..."):
+        if release == "latest":
+            url = f"https://api.github.com/repos/{owner}/{repo_name}/releases/latest"
+            response = httpx.get(url)
+            response.raise_for_status()
+        else:
+            release_tag = release
+            if not release.startswith("v"):
+                release_tag = f"v{release}"
+            url = f"https://api.github.com/repos/{owner}/{repo_name}/releases/tags/{release_tag}"
+            try:
+                response = httpx.get(url)
+                response.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 404 and not release.startswith("v"):
+                    # Try without 'v'
+                    url = f"https://api.github.com/repos/{owner}/{repo_name}/releases/tags/{release}"
+                    response = httpx.get(url)
+                    response.raise_for_status()
+                else:
+                    raise
+
+        release_data: Dict[str, Any] = response.json()
+        version = release_data["tag_name"]
+
+    assets: List[Asset] = release_data.get("assets", [])
+    archive_extensions = [".zip", ".tar.xz", ".tar.gz", ".tgz"]
+    archives = [
+        a for a in assets if any(a["name"].endswith(ext) for ext in archive_extensions)
+    ]
+    if not archives:
+        console.print(
+            f"[red]No archive asset found in the release for {repo_arg}.[/red]"
+        )
+        return
+
+    # Function to get priority for extensions (lower is better)
+    def get_priority(ext: str) -> int:
+        priorities_dict = {".tar.xz": 1, ".tar.gz": 2, ".tgz": 2, ".zip": 3}
+        return priorities_dict.get(ext, 4)
+
+    # Group archives by base name
+    groups: defaultdict[str, list[tuple[Asset, str]]] = defaultdict(list)
+    for a in archives:
+        base, ext = get_base_and_ext(a["name"])
+        groups[base].append((a, ext))
+
+    # Choose the best asset from each group
+    best_assets: list[Asset] = []
+    for items in groups.values():
+        if len(items) == 1:
+            best_assets.append(items[0][0])
+        else:
+            # Sort by size ascending, then by priority ascending
+            sorted_items = sorted(
+                items, key=lambda x: (x[0]["size"], get_priority(x[1]))
+            )
+            best_assets.append(sorted_items[0][0])
+
+    # If multiple groups, choose the overall best
+    if len(best_assets) > 1:
+        best_assets.sort(
+            key=lambda a: (a["size"], get_priority(get_base_and_ext(a["name"])[1]))
+        )
+
+    chosen_asset = best_assets[0]
+    archive_url: str = chosen_asset["browser_download_url"]
+    archive_name: str = chosen_asset["name"]
+    _, archive_ext = get_base_and_ext(archive_name)
+
+    console.print(f"Found archive: {archive_name}")
+
+    if not local:
+        installed_file = Path.home() / ".fontpm" / "installed.json"
+        if installed_file.exists():
+            try:
+                with open(installed_file) as f:
+                    temp_data = json.load(f)
+                installed_types = [
+                    entry.get("type")
+                    for entry in temp_data.get(repo_arg, [])
+                    if "type" in entry
+                ]
+                if installed_types and not keep_multiple and not force:
+                    console.print(
+                        f"[yellow]Already installed other types from {repo_arg}. "
+                        "Use --keep-multiple to install additional types or --force to overwrite.[/yellow]"
+                    )
+                    return
+            except Exception:
+                pass
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        extract_dir = Path(temp_dir)
+
+        with tempfile.NamedTemporaryFile(
+            dir=temp_dir, suffix=".archive", delete=False
+        ) as tmp_file:
+            tmp_path = Path(tmp_file.name)
+
+            with console.status("[bold green]Downloading archive..."):
+                with httpx.stream(
+                    "GET", archive_url, follow_redirects=True
+                ) as response:
+                    response.raise_for_status()
+                    with open(tmp_path, "wb") as f:
+                        for chunk in response.iter_bytes():
+                            f.write(chunk)
+
+            console.print("Download complete.")
+
+            with console.status("[bold green]Extracting..."):
+                if archive_ext == ".zip":
+                    with zipfile.ZipFile(tmp_path, "r") as archive_ref:
+                        archive_ref.extractall(extract_dir)
+                else:
+                    # For tar archives
+                    mode = "r:xz" if archive_ext == ".tar.xz" else "r:gz"
+                    with tarfile.open(tmp_path, mode) as archive_ref:
+                        archive_ref.extractall(extract_dir)
+
+        # Find all font files
+        ttf_files = list(extract_dir.rglob("*.ttf"))
+        otf_files = list(extract_dir.rglob("*.otf"))
+
+        variable_ttfs: list[Path] = []
+        static_ttfs: list[Path] = []
+        for ttf in ttf_files:
+            try:
+                if is_variable_font(str(ttf)):
+                    variable_ttfs.append(ttf)
+                else:
+                    static_ttfs.append(ttf)
+            except Exception:
+                # If can't check, treat as static
+                static_ttfs.append(ttf)
+
+        # Select fonts in order of preference
+        selected_fonts: list[Path] = []
+        selected_pri = None
+        for pri in priorities:
+            if pri == "variable-ttf" and variable_ttfs:
+                selected_fonts = variable_ttfs
+                selected_pri = pri
+                break
+            elif pri == "otf" and otf_files:
+                selected_fonts = otf_files
+                selected_pri = pri
+                break
+            elif pri == "static-ttf" and static_ttfs:
+                selected_fonts = static_ttfs
+                selected_pri = pri
+                break
+
+        if selected_fonts and not local:
+            installed_file = Path.home() / ".fontpm" / "installed.json"
+            if installed_file.exists():
+                try:
+                    with open(installed_file) as f:
+                        temp_data = json.load(f)
+                    installed_types = [
+                        entry.get("type")
+                        for entry in temp_data.get(repo_arg, [])
+                        if "type" in entry
+                    ]
+                    should_skip = False
+                    if selected_pri in installed_types:
+                        if not force:
+                            console.print(
+                                f"[yellow]Already installed {selected_pri} from {repo_arg}. "
+                                "Use --force to reinstall.[/yellow]"
+                            )
+                            should_skip = True
+                    if should_skip:
+                        return
+                except Exception:
+                    pass
+
+        # Track installed fonts for global installs
+        if selected_fonts and not local:
+            installed_file = Path.home() / ".fontpm" / "installed.json"
+            installed_file.parent.mkdir(exist_ok=True)
+            installed_data: Dict[str, List[FontEntry]] = {}
+            if installed_file.exists():
+                try:
+                    with open(installed_file) as f:
+                        installed_data = json.load(f)
+                except Exception:
+                    pass  # Ignore load errors
+
+            repo_key = repo_arg
+            if repo_key not in installed_data:
+                installed_data[repo_key] = []
+            for font_file in selected_fonts:
+                try:
+                    file_hash = hashlib.sha256(font_file.read_bytes()).hexdigest()
+                    assert selected_pri is not None
+                    entry: FontEntry = {
+                        "filename": font_file.name,
+                        "hash": file_hash,
+                        "type": selected_pri,
+                        "version": version,
+                    }
+                    if entry not in installed_data[repo_key]:
+                        installed_data[repo_key].append(entry)
+                except Exception as e:
+                    console.print(
+                        f"[yellow]Warning: Could not hash {font_file.name}: {e}[/yellow]"
+                    )
+
+            try:
+                with open(installed_file, "w") as f:
+                    json.dump(installed_data, f, indent=2)
+            except Exception as e:
+                console.print(
+                    f"[yellow]Warning: Could not save install data: {e}[/yellow]"
+                )
+
+        if selected_fonts:
+            with console.status("[bold green]Moving fonts..."):
+                for font_file in selected_fonts:
+                    shutil.move(str(font_file), str(dest_dir / font_file.name))
+            number_selected_fonts = len(selected_fonts)
+            console.print(
+                f"[green]Moved {number_selected_fonts} font{'' if number_selected_fonts == 1 else 's'} from "
+                f"{repo_arg} to: {dest_dir}[/green]"
+            )
+        else:
+            msg = f"[yellow]No font files found in the archive for {repo_arg}.[/yellow]"
+            console.print(msg)
 
 
 @app.command()
@@ -113,242 +367,15 @@ def install(
     dest_dir = Path.cwd() if local else default_path
     dest_dir.mkdir(exist_ok=True)
 
-    # Function to get base name and extension
-    def get_base_and_ext(name: str) -> tuple[str, str]:
-        for ext in archive_extensions:
-            if name.endswith(ext):
-                return name[: -len(ext)], ext
-        return name, ""
-
     for repo_arg in repo:
-        console.print(f"[bold]Installing from {repo_arg}...[/bold]")
         try:
             owner, repo_name = repo_arg.split("/")
         except ValueError:
             console.print(f"[red]Invalid repo format: {repo_arg}. Use owner/repo[/red]")
             continue
-
-        with console.status("[bold green]Fetching release info..."):
-            if release == "latest":
-                url = (
-                    f"https://api.github.com/repos/{owner}/{repo_name}/releases/latest"
-                )
-            else:
-                # Ensure release tag has 'v' prefix if not present
-                if not release.startswith("v"):
-                    release = f"v{release}"
-                url = f"https://api.github.com/repos/{owner}/{repo_name}/releases/tags/{release}"
-
-            response = httpx.get(url)
-            response.raise_for_status()
-            release_data: Dict[str, Any] = response.json()
-
-        assets: List[Asset] = release_data.get("assets", [])
-        archive_extensions = [".zip", ".tar.xz", ".tar.gz", ".tgz"]
-        archives = [
-            a
-            for a in assets
-            if any(a["name"].endswith(ext) for ext in archive_extensions)
-        ]
-        if not archives:
-            console.print(
-                f"[red]No archive asset found in the release for {repo_arg}.[/red]"
-            )
-            continue
-
-        # Function to get priority for extensions (lower is better)
-        def get_priority(ext: str) -> int:
-            priorities = {".tar.xz": 1, ".tar.gz": 2, ".tgz": 2, ".zip": 3}
-            return priorities.get(ext, 4)
-
-        # Group archives by base name
-        groups: defaultdict[str, list[tuple[Asset, str]]] = defaultdict(list)
-        for a in archives:
-            base, ext = get_base_and_ext(a["name"])
-            groups[base].append((a, ext))
-
-        # Choose the best asset from each group
-        best_assets: list[Asset] = []
-        for items in groups.values():
-            if len(items) == 1:
-                best_assets.append(items[0][0])
-            else:
-                # Sort by size ascending, then by priority ascending
-                sorted_items = sorted(
-                    items, key=lambda x: (x[0]["size"], get_priority(x[1]))
-                )
-                best_assets.append(sorted_items[0][0])
-
-        # If multiple groups, choose the overall best
-        if len(best_assets) > 1:
-            best_assets.sort(
-                key=lambda a: (a["size"], get_priority(get_base_and_ext(a["name"])[1]))
-            )
-
-        chosen_asset = best_assets[0]
-        archive_url: str = chosen_asset["browser_download_url"]
-        archive_name: str = chosen_asset["name"]
-        _, archive_ext = get_base_and_ext(archive_name)
-
-        console.print(f"Found archive: {archive_name}")
-
-        if not local:
-            installed_file = Path.home() / ".fontpm" / "installed.json"
-            if installed_file.exists():
-                try:
-                    with open(installed_file) as f:
-                        temp_data = json.load(f)
-                    installed_types = [
-                        entry.get("type")
-                        for entry in temp_data.get(repo_arg, [])
-                        if "type" in entry
-                    ]
-                    if installed_types and not keep_multiple and not force:
-                        console.print(
-                            f"[yellow]Already installed other types from {repo_arg}. "
-                            "Use --keep-multiple to install additional types or --force to overwrite.[/yellow]"
-                        )
-                        continue
-                except Exception:
-                    pass
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            extract_dir = Path(temp_dir)
-
-            with tempfile.NamedTemporaryFile(
-                dir=temp_dir, suffix=".archive", delete=False
-            ) as tmp_file:
-                tmp_path = Path(tmp_file.name)
-
-                with console.status("[bold green]Downloading archive..."):
-                    with httpx.stream(
-                        "GET", archive_url, follow_redirects=True
-                    ) as response:
-                        response.raise_for_status()
-                        with open(tmp_path, "wb") as f:
-                            for chunk in response.iter_bytes():
-                                f.write(chunk)
-
-                console.print("Download complete.")
-
-                with console.status("[bold green]Extracting..."):
-                    if archive_ext == ".zip":
-                        with zipfile.ZipFile(tmp_path, "r") as archive_ref:
-                            archive_ref.extractall(extract_dir)
-                    else:
-                        # For tar archives
-                        mode = "r:xz" if archive_ext == ".tar.xz" else "r:gz"
-                        with tarfile.open(tmp_path, mode) as archive_ref:
-                            archive_ref.extractall(extract_dir)
-
-            # Find all font files
-            ttf_files = list(extract_dir.rglob("*.ttf"))
-            otf_files = list(extract_dir.rglob("*.otf"))
-
-            variable_ttfs: list[Path] = []
-            static_ttfs: list[Path] = []
-            for ttf in ttf_files:
-                try:
-                    if is_variable_font(str(ttf)):
-                        variable_ttfs.append(ttf)
-                    else:
-                        static_ttfs.append(ttf)
-                except Exception:
-                    # If can't check, treat as static
-                    static_ttfs.append(ttf)
-
-            # Select fonts in order of preference
-            selected_fonts: list[Path] = []
-            selected_pri = None
-            for pri in priorities:
-                if pri == "variable-ttf" and variable_ttfs:
-                    selected_fonts = variable_ttfs
-                    selected_pri = pri
-                    break
-                elif pri == "otf" and otf_files:
-                    selected_fonts = otf_files
-                    selected_pri = pri
-                    break
-                elif pri == "static-ttf" and static_ttfs:
-                    selected_fonts = static_ttfs
-                    selected_pri = pri
-                    break
-
-            if selected_fonts and not local:
-                installed_file = Path.home() / ".fontpm" / "installed.json"
-                if installed_file.exists():
-                    try:
-                        with open(installed_file) as f:
-                            temp_data = json.load(f)
-                        installed_types = [
-                            entry.get("type")
-                            for entry in temp_data.get(repo_arg, [])
-                            if "type" in entry
-                        ]
-                        should_skip = False
-                        if selected_pri in installed_types:
-                            if not force:
-                                console.print(
-                                    f"[yellow]Already installed {selected_pri} from {repo_arg}. "
-                                    "Use --force to reinstall.[/yellow]"
-                                )
-                                should_skip = True
-                        if should_skip:
-                            continue
-                    except Exception:
-                        pass
-
-            # Track installed fonts for global installs
-            if selected_fonts and not local:
-                installed_file = Path.home() / ".fontpm" / "installed.json"
-                installed_file.parent.mkdir(exist_ok=True)
-                installed_data: Dict[str, List[FontEntry]] = {}
-                if installed_file.exists():
-                    try:
-                        with open(installed_file) as f:
-                            installed_data = json.load(f)
-                    except Exception:
-                        pass  # Ignore load errors
-
-                repo_key = repo_arg
-                if repo_key not in installed_data:
-                    installed_data[repo_key] = []
-                for font_file in selected_fonts:
-                    try:
-                        file_hash = hashlib.sha256(font_file.read_bytes()).hexdigest()
-                        assert selected_pri is not None
-                        entry: FontEntry = {
-                            "filename": font_file.name,
-                            "hash": file_hash,
-                            "type": selected_pri,
-                        }
-                        if entry not in installed_data[repo_key]:
-                            installed_data[repo_key].append(entry)
-                    except Exception as e:
-                        console.print(
-                            f"[yellow]Warning: Could not hash {font_file.name}: {e}[/yellow]"
-                        )
-
-                try:
-                    with open(installed_file, "w") as f:
-                        json.dump(installed_data, f, indent=2)
-                except Exception as e:
-                    console.print(
-                        f"[yellow]Warning: Could not save install data: {e}[/yellow]"
-                    )
-
-            if selected_fonts:
-                with console.status("[bold green]Moving fonts..."):
-                    for font_file in selected_fonts:
-                        shutil.move(str(font_file), str(dest_dir / font_file.name))
-                number_selected_fonts = len(selected_fonts)
-                console.print(
-                    f"[green]Moved {number_selected_fonts} font{'' if number_selected_fonts == 1 else 's'} from "
-                    f"{repo_arg} to: {dest_dir}[/green]"
-                )
-            else:
-                msg = f"[yellow]No font files found in the archive for {repo_arg}.[/yellow]"
-                console.print(msg)
+        install_single_repo(
+            owner, repo_name, release, priorities, dest_dir, local, force, keep_multiple
+        )
 
 
 @app.command()
@@ -491,6 +518,126 @@ def is_variable(
     except Exception as e:
         console.print(f"[red]Error checking font: {e}[/red]")
         raise typer.Exit(1) from e
+
+
+@app.command()
+def update():
+    """
+    Update installed fonts to the latest versions.
+    """
+    installed_file = Path.home() / ".fontpm" / "installed.json"
+    if not installed_file.exists():
+        console.print("[yellow]No installed fonts data found.[/yellow]")
+        return
+
+    try:
+        with open(installed_file) as f:
+            installed_data: Dict[str, List[FontEntry]] = json.load(f)
+    except Exception as e:
+        console.print(f"[red]Error loading installed data: {e}[/red]")
+        raise typer.Exit(1) from e
+
+    from packaging.version import Version
+
+    updated_count = 0
+    repos_to_update: List[Tuple[str, str, str, str, str, List[FontEntry]]] = []
+
+    for repo_arg, fonts in installed_data.items():
+        if not fonts:
+            continue
+
+        # Assume all have same version
+        installed_version = fonts[0]["version"]
+
+        try:
+            owner, repo_name = repo_arg.split("/")
+        except ValueError:
+            console.print(f"[red]Invalid repo format in data: {repo_arg}[/red]")
+            continue
+
+        try:
+            url = f"https://api.github.com/repos/{owner}/{repo_name}/releases/latest"
+            response = httpx.get(url)
+            response.raise_for_status()
+            release_data = response.json()
+            latest_version = release_data["tag_name"]
+        except Exception as e:
+            console.print(
+                f"[yellow]Could not fetch latest for {repo_arg}: {e}[/yellow]"
+            )
+            continue
+
+        # Strip 'v' if present
+        def clean_version(v: str) -> str:
+            return v.lstrip("v")
+
+        try:
+            if Version(clean_version(latest_version)) > Version(
+                clean_version(installed_version)
+            ):
+                repos_to_update.append(
+                    (
+                        repo_arg,
+                        installed_version,
+                        latest_version,
+                        owner,
+                        repo_name,
+                        fonts,
+                    )
+                )
+        except Exception as e:
+            console.print(
+                f"[yellow]Could not compare versions for {repo_arg}: {e}[/yellow]"
+            )
+
+    for (
+        repo_arg,
+        installed_version,
+        latest_version,
+        owner,
+        repo_name,
+        fonts,
+    ) in repos_to_update:
+        console.print(
+            f"[bold]Updating {repo_arg} from {installed_version} to {latest_version}...[/bold]"
+        )
+        # Uninstall old
+        dest_dir = default_path
+        for font_info in fonts:
+            filename = font_info["filename"]
+            font_path = dest_dir / filename
+            if font_path.exists():
+                try:
+                    font_path.unlink()
+                except Exception as e:
+                    console.print(f"[red]Could not delete {filename}: {e}[/red]")
+        # Remove from data
+        del installed_data[repo_arg]
+        # Save
+        try:
+            with open(installed_file, "w") as f:
+                json.dump(installed_data, f, indent=2)
+        except Exception as e:
+            console.print(
+                f"[yellow]Warning: Could not update installed data: {e}[/yellow]"
+            )
+        # Install new
+        install_single_repo(
+            owner,
+            repo_name,
+            "latest",
+            default_priorities,
+            default_path,
+            False,
+            True,
+            True,
+        )
+        updated_count += 1
+
+    for repo_arg, fonts in installed_data.items():
+        if fonts:
+            installed_version = fonts[0]["version"]
+            console.print(f"[dim]{repo_arg} is up to date ({installed_version}).[/dim]")
 
 
 if __name__ == "__main__":
