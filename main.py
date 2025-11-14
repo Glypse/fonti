@@ -286,9 +286,9 @@ def download_and_extract_archive(archive_url: str, archive_ext: str) -> Path:
 
 
 def select_fonts(
-    categorized_fonts: Tuple[List[Path], ...], priorities: List[str]
+    categorized_fonts: Tuple[List[Path], ...], priorities: List[str], weights: List[int]
 ) -> Tuple[List[Path], str]:
-    """Select fonts based on priorities."""
+    """Select fonts based on priorities and weights."""
     (
         variable_ttfs,
         static_ttfs,
@@ -303,33 +303,70 @@ def select_fonts(
     selected_pri = ""
     for pri in priorities:
         if pri == "variable-woff2" and variable_woff2s:
+            if weights:
+                console.print(
+                    "[yellow]Warning: Weights are ignored for variable fonts.[/yellow]"
+                )
             selected_fonts = variable_woff2s
             selected_pri = pri
             break
         elif pri == "static-woff2" and static_woff2s:
-            selected_fonts = static_woff2s
-            selected_pri = pri
-            break
+            candidates = static_woff2s
+            if weights:
+                candidates = [
+                    f for f in candidates if get_font_weight(str(f)) in weights
+                ]
+            if candidates:
+                selected_fonts = candidates
+                selected_pri = pri
+                break
         elif pri == "variable-woff" and variable_woffs:
+            if weights:
+                console.print(
+                    "[yellow]Warning: Weights are ignored for variable fonts.[/yellow]"
+                )
             selected_fonts = variable_woffs
             selected_pri = pri
             break
         elif pri == "static-woff" and static_woffs:
-            selected_fonts = static_woffs
-            selected_pri = pri
-            break
+            candidates = static_woffs
+            if weights:
+                candidates = [
+                    f for f in candidates if get_font_weight(str(f)) in weights
+                ]
+            if candidates:
+                selected_fonts = candidates
+                selected_pri = pri
+                break
         elif pri == "variable-ttf" and variable_ttfs:
+            if weights:
+                console.print(
+                    "[yellow]Warning: Weights are ignored for variable fonts.[/yellow]"
+                )
             selected_fonts = variable_ttfs
             selected_pri = pri
             break
         elif pri == "otf" and otf_files:
-            selected_fonts = otf_files
-            selected_pri = pri
-            break
+            # OTF are static, filter by weights
+            candidates = otf_files
+            if weights:
+                candidates = [
+                    f for f in candidates if get_font_weight(str(f)) in weights
+                ]
+            if candidates:
+                selected_fonts = candidates
+                selected_pri = pri
+                break
         elif pri == "static-ttf" and static_ttfs:
-            selected_fonts = static_ttfs
-            selected_pri = pri
-            break
+            candidates = static_ttfs
+            if weights:
+                candidates = [
+                    f for f in candidates if get_font_weight(str(f)) in weights
+                ]
+            if candidates:
+                selected_fonts = candidates
+                selected_pri = pri
+                break
 
     return selected_fonts, selected_pri
 
@@ -391,6 +428,18 @@ def is_variable_font(font_path: str) -> bool:
     return "fvar" in font
 
 
+def get_font_weight(font_path: str) -> int:
+    """
+    Get the weight class of a font file.
+    """
+    try:
+        font = TTFont(font_path)
+        os2_table = font["OS/2"]  # type: ignore
+        return os2_table.usWeightClass  # type: ignore
+    except Exception:
+        return 400  # default to regular
+
+
 def install_single_repo(
     owner: str,
     repo_name: str,
@@ -400,6 +449,7 @@ def install_single_repo(
     local: bool,
     force: bool,
     keep_multiple: bool,
+    weights: List[int],
 ) -> None:
     """
     Install fonts from a single GitHub repository.
@@ -475,7 +525,9 @@ def install_single_repo(
         )
 
         categorized_fonts = categorize_fonts(font_files)
-        selected_fonts, selected_pri = select_fonts(categorized_fonts, priorities)
+        selected_fonts, selected_pri = select_fonts(
+            categorized_fonts, priorities, weights
+        )
 
         # Check for type conflict
         if selected_fonts and not local:
@@ -529,6 +581,12 @@ def install(
         "-km",
         help="Allow installing multiple font types from the same repo",
     ),
+    weights: str = typer.Option(
+        "",
+        "--weights",
+        "-w",
+        help="Comma-separated list of font weights to install (e.g., 400,700 or Regular,Bold)",
+    ),
 ):
     """
     Install fonts from a GitHub release.
@@ -540,6 +598,31 @@ def install(
             f"{', '.join(VALID_FORMATS)}[/red]"
         )
         raise typer.Exit(1)
+
+    weight_map = {
+        "thin": 100,
+        "extralight": 200,
+        "light": 300,
+        "regular": 400,
+        "medium": 500,
+        "semibold": 600,
+        "bold": 700,
+        "extrabold": 800,
+        "black": 900,
+    }
+    parsed_weights: List[int] = []
+    if weights:
+        for w in weights.split(","):
+            w = w.strip()
+            if w.isdigit():
+                parsed_weights.append(int(w))
+            else:
+                w_lower = w.lower()
+                if w_lower in weight_map:
+                    parsed_weights.append(weight_map[w_lower])
+                else:
+                    console.print(f"[red]Unknown weight: {w}[/red]")
+                    raise typer.Exit(1)
 
     dest_dir = Path.cwd() if local else default_path
     dest_dir.mkdir(exist_ok=True)
@@ -559,6 +642,7 @@ def install(
             local,
             force,
             keep_multiple,
+            parsed_weights,
         )
 
 
@@ -810,6 +894,7 @@ def update(
             False,
             True,
             True,
+            [],
         )
         updated_count += 1
 
@@ -918,6 +1003,7 @@ def import_fonts(
             local,
             force,
             keep_multiple,
+            [],
         )
 
 

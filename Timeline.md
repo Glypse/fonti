@@ -8,7 +8,7 @@
 -   [ ] Changelog preview
 -   [x] Support for non-global installations (example use case: woff2 install insisde of a web app repo)
 -   [x] Enable importing/exporting `fontpm-fonts.json`
--   [ ] Specify selected weight(s)
+-   [x] Specify selected weight(s)
 -   [ ] Caching
     -   [ ] --info flag for the font before install
     -   [ ] When local install/import, check if the font files aren't already cached or installed on the system; use those by preference

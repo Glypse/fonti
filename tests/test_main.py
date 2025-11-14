@@ -196,6 +196,7 @@ class TestImport:
                 False,
                 False,
                 False,
+                [],
             )
 
 
@@ -396,6 +397,7 @@ class TestUpdate:
                 False,
                 True,
                 True,
+                [],
             )
             # Assert old fonts are deleted
             mock_exists.assert_called_once_with()
@@ -495,6 +497,7 @@ class TestUpdate:
                 False,
                 True,
                 True,
+                [],
             )
 
     @patch("httpx.get")
@@ -580,6 +583,7 @@ class TestUpdate:
                 False,
                 True,
                 True,
+                [],
             )
 
 
@@ -599,6 +603,7 @@ class TestInstall:
             False,
             False,
             False,
+            [],
         )
 
     def test_install_invalid_repo_format(self, runner: CliRunner) -> None:
@@ -626,6 +631,7 @@ class TestInstall:
             False,
             True,  # force=True
             False,
+            [],
         )
 
     @patch("main.install_single_repo")
@@ -643,6 +649,7 @@ class TestInstall:
             True,  # local=True
             False,
             False,
+            [],
         )
 
     @patch("main.install_single_repo")
@@ -660,6 +667,7 @@ class TestInstall:
             False,
             False,
             True,  # keep_multiple=True
+            [],
         )
 
     @patch("main.install_single_repo")
@@ -677,6 +685,7 @@ class TestInstall:
             False,
             False,
             False,
+            [],
         )
 
     @patch("main.install_single_repo")
@@ -696,7 +705,51 @@ class TestInstall:
             False,
             False,
             False,
+            [],
         )
+
+    @patch("main.install_single_repo")
+    def test_install_with_weights(
+        self, mock_install: MagicMock, runner: CliRunner
+    ) -> None:
+        result = runner.invoke(app, ["install", "owner/repo", "--weights", "400,700"])
+        assert result.exit_code == 0
+        mock_install.assert_called_once_with(
+            "owner",
+            "repo",
+            "latest",
+            ["variable-ttf", "otf", "static-ttf"],
+            Path("/Users/sacha/Library/Fonts"),
+            False,
+            False,
+            False,
+            [400, 700],
+        )
+
+    @patch("main.install_single_repo")
+    def test_install_with_weights_names(
+        self, mock_install: MagicMock, runner: CliRunner
+    ) -> None:
+        result = runner.invoke(
+            app, ["install", "owner/repo", "--weights", "Regular,Bold"]
+        )
+        assert result.exit_code == 0
+        mock_install.assert_called_once_with(
+            "owner",
+            "repo",
+            "latest",
+            ["variable-ttf", "otf", "static-ttf"],
+            Path("/Users/sacha/Library/Fonts"),
+            False,
+            False,
+            False,
+            [400, 700],
+        )
+
+    def test_install_invalid_weights(self, runner: CliRunner) -> None:
+        result = runner.invoke(app, ["install", "owner/repo", "--weights", "invalid"])
+        assert result.exit_code == 1
+        assert "Unknown weight: invalid" in result.output
 
 
 class TestFontFunctions:
@@ -725,6 +778,26 @@ class TestFontFunctions:
 
         with pytest.raises(Exception, match="Font error"):
             is_variable_font("dummy.ttf")
+
+    @patch("main.TTFont")
+    def test_get_font_weight(self, mock_ttfont: MagicMock) -> None:
+        mock_font = MagicMock()
+        mock_os2 = MagicMock()
+        mock_os2.usWeightClass = 700
+        mock_font.__getitem__ = lambda *args: mock_os2 if args[1] == "OS/2" else None  # type: ignore
+        mock_ttfont.return_value = mock_font
+        from main import get_font_weight
+
+        weight = get_font_weight("dummy.ttf")
+        assert weight == 700
+
+    @patch("main.TTFont")
+    def test_get_font_weight_error(self, mock_ttfont: MagicMock) -> None:
+        mock_ttfont.side_effect = Exception("Font error")
+        from main import get_font_weight
+
+        weight = get_font_weight("dummy.ttf")
+        assert weight == 400  # default
 
     def test_parse_repo_valid(self) -> None:
         from main import parse_repo
@@ -835,7 +908,9 @@ class TestFontFunctions:
             ),
         )
 
-        selected, pri = select_fonts(categorized, ["variable-ttf", "otf", "static-ttf"])
+        selected, pri = select_fonts(
+            categorized, ["variable-ttf", "otf", "static-ttf"], []
+        )
         assert selected == [Path("var.ttf")]
         assert pri == "variable-ttf"
 
@@ -855,7 +930,9 @@ class TestFontFunctions:
             ),
         )
 
-        selected, pri = select_fonts(categorized, ["variable-ttf", "otf", "static-ttf"])
+        selected, pri = select_fonts(
+            categorized, ["variable-ttf", "otf", "static-ttf"], []
+        )
         assert selected == [Path("static.ttf")]
         assert pri == "static-ttf"
 
@@ -867,7 +944,7 @@ class TestFontFunctions:
             ([], [], [], [], [], [], []),  # all empty
         )
 
-        selected, pri = select_fonts(categorized, ["variable-ttf"])
+        selected, pri = select_fonts(categorized, ["variable-ttf"], [])
         assert selected == []
         assert pri == ""
 
