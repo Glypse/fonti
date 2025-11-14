@@ -10,7 +10,9 @@ from typing import Any, Dict, List, Tuple, TypedDict
 
 import httpx
 import typer
+from diskcache import Cache  # type: ignore
 from fontTools.ttLib import TTFont  # type: ignore
+from platformdirs import user_cache_dir
 from rich.console import Console
 
 app = typer.Typer()
@@ -32,6 +34,11 @@ DEFAULT_PRIORITIES = ["variable-ttf", "otf", "static-ttf"]
 DEFAULT_PATH = Path.home() / "Library" / "Fonts"
 CONFIG_FILE = Path.home() / ".fontpm" / "config"
 INSTALLED_FILE = Path.home() / ".fontpm" / "installed.json"
+
+# Cache setup
+CACHE_SIZE_LIMIT = 1 * 1024 * 1024 * 1024  # 1GB
+CACHE_DIR = Path(user_cache_dir("fontpm"))
+CACHE = Cache(str(CACHE_DIR), size_limit=CACHE_SIZE_LIMIT)
 
 
 class Asset(TypedDict):
@@ -252,37 +259,74 @@ def select_archive_asset(assets: List[Asset]) -> Asset:
     return best_assets[0]
 
 
-def download_and_extract_archive(archive_url: str, archive_ext: str) -> Path:
-    """Download and extract the archive to a temporary directory."""
-    temp_dir = tempfile.mkdtemp()
-    extract_dir = Path(temp_dir)
+def get_or_download_and_extract_archive(
+    owner: str,
+    repo_name: str,
+    version: str,
+    archive_url: str,
+    archive_ext: str,
+    archive_name: str,
+) -> Path:
+    """Get archive from cache or download and extract to a temporary directory."""
+    key = f"{owner}-{repo_name}-{version}{archive_ext}"
 
-    tmp_file = tempfile.NamedTemporaryFile(
-        dir=temp_dir, suffix=".archive", delete=False
-    )
-    tmp_path = Path(tmp_file.name)
-    tmp_file.close()
+    if key in CACHE:
+        console.print(f"Using cached archive: {key}")
+        cached_archive_path = str(CACHE[key])  # type: ignore
+        temp_dir = tempfile.mkdtemp()
+        extract_dir = Path(temp_dir)
 
-    with console.status("[bold green]Downloading archive..."):
-        with httpx.stream("GET", archive_url, follow_redirects=True) as response:
-            response.raise_for_status()
-            with open(tmp_path, "wb") as f:
-                for chunk in response.iter_bytes():
-                    f.write(chunk)
+        with console.status("[bold green]Extracting from cache..."):
+            if archive_ext == ".zip":
+                with zipfile.ZipFile(cached_archive_path, "r") as archive_ref:
+                    archive_ref.extractall(extract_dir)
+            else:
+                mode = "r:xz" if archive_ext == ".tar.xz" else "r:gz"
+                with tarfile.open(cached_archive_path, mode) as archive_ref:
+                    archive_ref.extractall(extract_dir)
 
-    console.print("Download complete.")
+        return extract_dir
+    else:
+        console.print(f"Downloading archive: {archive_name}")
+        temp_dir = tempfile.mkdtemp()
+        extract_dir = Path(temp_dir)
 
-    with console.status("[bold green]Extracting..."):
-        if archive_ext == ".zip":
-            with zipfile.ZipFile(tmp_path, "r") as archive_ref:
-                archive_ref.extractall(extract_dir)
+        tmp_file = tempfile.NamedTemporaryFile(
+            dir=temp_dir, suffix=".archive", delete=False
+        )
+        tmp_path = Path(tmp_file.name)
+        tmp_file.close()
+
+        with console.status("[bold green]Downloading archive..."):
+            with httpx.stream("GET", archive_url, follow_redirects=True) as response:
+                response.raise_for_status()
+                with open(tmp_path, "wb") as f:
+                    for chunk in response.iter_bytes():
+                        f.write(chunk)
+
+        console.print("Download complete.")
+
+        # Check cache size before adding
+        archive_size = tmp_path.stat().st_size
+        if CACHE.volume() + archive_size <= CACHE_SIZE_LIMIT:
+            # Copy to cache
+            cache_path = CACHE_DIR / f"{key}"
+            shutil.copy(tmp_path, cache_path)
+            CACHE[key] = str(cache_path)
+            console.print("Archive cached.")
         else:
-            # For tar archives
-            mode = "r:xz" if archive_ext == ".tar.xz" else "r:gz"
-            with tarfile.open(tmp_path, mode) as archive_ref:
-                archive_ref.extractall(extract_dir)
+            console.print("Cache full, not caching this archive.")
 
-    return extract_dir
+        with console.status("[bold green]Extracting..."):
+            if archive_ext == ".zip":
+                with zipfile.ZipFile(tmp_path, "r") as archive_ref:
+                    archive_ref.extractall(extract_dir)
+            else:
+                mode = "r:xz" if archive_ext == ".tar.xz" else "r:gz"
+                with tarfile.open(tmp_path, mode) as archive_ref:
+                    archive_ref.extractall(extract_dir)
+
+        return extract_dir
 
 
 def select_fonts(
@@ -550,15 +594,50 @@ def install_single_repo(
 
     extract_dir = None
     try:
-        version, assets = fetch_release_info(owner, repo_name, release)
-        chosen_asset = select_archive_asset(assets)
-        archive_url = chosen_asset["browser_download_url"]
-        archive_name = chosen_asset["name"]
-        _, archive_ext = get_base_and_ext(archive_name)
+        if release == "latest":
+            version, assets = fetch_release_info(owner, repo_name, release)
+            chosen_asset = select_archive_asset(assets)
+            archive_url = chosen_asset["browser_download_url"]
+            archive_name = chosen_asset["name"]
+            _, archive_ext = get_base_and_ext(archive_name)
 
-        console.print(f"Found archive: {archive_name}")
+            extract_dir = get_or_download_and_extract_archive(
+                owner, repo_name, version, archive_url, archive_ext, archive_name
+            )
+        else:
+            version = release
+            cached_key = None
+            archive_ext = None
+            for ext in ARCHIVE_EXTENSIONS:
+                key = f"{owner}-{repo_name}-{version}{ext}"
+                if key in CACHE:
+                    cached_key = key
+                    archive_ext = ext
+                    break
+            if cached_key:
+                console.print(f"Using cached archive: {cached_key}")
+                cached_archive_path = str(CACHE[cached_key])  # type: ignore
+                temp_dir = tempfile.mkdtemp()
+                extract_dir = Path(temp_dir)
 
-        extract_dir = download_and_extract_archive(archive_url, archive_ext)
+                with console.status("[bold green]Extracting from cache..."):
+                    if archive_ext == ".zip":
+                        with zipfile.ZipFile(cached_archive_path, "r") as archive_ref:
+                            archive_ref.extractall(extract_dir)
+                    else:
+                        mode = "r:xz" if archive_ext == ".tar.xz" else "r:gz"
+                        with tarfile.open(cached_archive_path, mode) as archive_ref:
+                            archive_ref.extractall(extract_dir)
+            else:
+                _, assets = fetch_release_info(owner, repo_name, release)
+                chosen_asset = select_archive_asset(assets)
+                archive_url = chosen_asset["browser_download_url"]
+                archive_name = chosen_asset["name"]
+                _, archive_ext = get_base_and_ext(archive_name)
+
+                extract_dir = get_or_download_and_extract_archive(
+                    owner, repo_name, version, archive_url, archive_ext, archive_name
+                )
 
         # Find all font files
         font_files = (

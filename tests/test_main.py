@@ -1018,6 +1018,9 @@ class TestFontFunctions:
             "https://api.github.com/repos/owner/repo/releases/tags/v2.0"
         )
 
+    @patch("shutil.copy")
+    @patch("main.CACHE")
+    @patch("pathlib.Path.stat")
     @patch("builtins.open")
     @patch("tempfile.NamedTemporaryFile")
     @patch("tempfile.mkdtemp")
@@ -1030,8 +1033,11 @@ class TestFontFunctions:
         mock_mkdtemp: MagicMock,
         mock_named_temp: MagicMock,
         mock_open: MagicMock,
+        mock_stat: MagicMock,
+        mock_cache: MagicMock,
+        _mock_copy: MagicMock,
     ) -> None:
-        from main import download_and_extract_archive
+        from main import get_or_download_and_extract_archive
 
         # Mock mkdtemp
         mock_mkdtemp.return_value = "/tmp/test"
@@ -1052,13 +1058,159 @@ class TestFontFunctions:
         # Mock open
         mock_open.return_value.__enter__.return_value = MagicMock()
 
+        # Mock stat
+        mock_stat.return_value.st_size = 1000
+
+        # Mock cache
+        mock_cache.__contains__.return_value = False
+        mock_cache.volume.return_value = 0
+
         # Mock zip file
         mock_zip.return_value.__enter__.return_value.extractall.return_value = None
 
-        result = download_and_extract_archive("http://example.com/file.zip", ".zip")
+        result = get_or_download_and_extract_archive(
+            "owner", "repo", "v1.0", "http://example.com/file.zip", ".zip", "file.zip"
+        )
         assert str(result) == "/tmp/test"
 
         mock_zip.assert_called_once()
         mock_zip.return_value.__enter__.return_value.extractall.assert_called_once_with(
             Path("/tmp/test")
         )
+
+
+class TestInstallSingleRepo:
+    @patch("shutil.rmtree")
+    @patch("main.CACHE")
+    @patch("main.fetch_release_info")
+    @patch("tempfile.mkdtemp")
+    @patch("zipfile.ZipFile")
+    def test_cache_hit_specific_release(
+        self,
+        mock_zip: MagicMock,
+        mock_mkdtemp: MagicMock,
+        mock_fetch: MagicMock,
+        mock_cache: MagicMock,
+        _mock_rmtree: MagicMock,
+    ) -> None:
+        from main import install_single_repo
+
+        # Mock cache hit
+        mock_cache.__contains__.return_value = True
+        mock_cache.__getitem__.return_value = "/cache/path.zip"
+
+        # Mock temp dir
+        mock_mkdtemp.return_value = "/tmp/extract"
+
+        # Mock zip extraction
+        mock_zip.return_value.__enter__.return_value.extractall.return_value = None
+
+        # Call with specific release
+        install_single_repo(
+            "rsms",
+            "inter",
+            "4.1",
+            ["static-ttf"],
+            Path("/dest"),
+            True,
+            False,
+            False,
+            [],
+            ["roman", "italic"],
+        )
+
+        # Should not call fetch_release_info
+        mock_fetch.assert_not_called()
+
+        # Should extract from cache
+        mock_zip.assert_called_once_with("/cache/path.zip", "r")
+        mock_zip.return_value.__enter__.return_value.extractall.assert_called_once_with(
+            Path("/tmp/extract")
+        )
+
+    @patch("shutil.rmtree")
+    @patch("main.CACHE")
+    @patch("main.fetch_release_info")
+    @patch("main.get_or_download_and_extract_archive")
+    def test_cache_miss_specific_release(
+        self,
+        mock_get_or_download: MagicMock,
+        mock_fetch: MagicMock,
+        mock_cache: MagicMock,
+        _mock_rmtree: MagicMock,
+    ) -> None:
+        from main import install_single_repo
+
+        # Mock cache miss
+        mock_cache.__contains__.return_value = False
+
+        # Mock fetch for assets
+        mock_fetch.return_value = (
+            "4.1",
+            [{"name": "inter.zip", "size": 1000, "browser_download_url": "url"}],
+        )
+
+        # Mock download and extract
+        mock_get_or_download.return_value = Path("/tmp/extract")
+
+        # Call with specific release
+        install_single_repo(
+            "rsms",
+            "inter",
+            "4.1",
+            ["static-ttf"],
+            Path("/dest"),
+            True,
+            False,
+            False,
+            [],
+            ["roman", "italic"],
+        )
+
+        # Should call fetch_release_info once for assets
+        mock_fetch.assert_called_once_with("rsms", "inter", "4.1")
+
+        # Should download
+        mock_get_or_download.assert_called_once()
+
+    @patch("shutil.rmtree")
+    @patch("main.CACHE")
+    @patch("main.fetch_release_info")
+    @patch("main.get_or_download_and_extract_archive")
+    def test_latest_release_always_fetches(
+        self,
+        mock_get_or_download: MagicMock,
+        mock_fetch: MagicMock,
+        _mock_cache: MagicMock,
+        _mock_rmtree: MagicMock,
+    ) -> None:
+        from main import install_single_repo
+
+        # Mock fetch
+        mock_fetch.return_value = (
+            "4.1",
+            [{"name": "inter.zip", "size": 1000, "browser_download_url": "url"}],
+        )
+
+        # Mock download and extract
+        mock_get_or_download.return_value = Path("/tmp/extract")
+
+        # Call with latest
+        install_single_repo(
+            "rsms",
+            "inter",
+            "latest",
+            ["static-ttf"],
+            Path("/dest"),
+            True,
+            False,
+            False,
+            [],
+            ["roman", "italic"],
+        )
+
+        # Should call fetch_release_info
+        mock_fetch.assert_called_once_with("rsms", "inter", "latest")
+
+        # Should download
+        mock_get_or_download.assert_called_once()
