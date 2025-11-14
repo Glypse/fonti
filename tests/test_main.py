@@ -1289,7 +1289,7 @@ class TestFix:
 
     def test_fix_no_duplicates(self, runner: CliRunner) -> None:
         installed_data = {
-            "repo1": {
+            "owner1/repo1": {
                 "font1.ttf": {
                     "filename": "font1.ttf",
                     "hash": "hash1",
@@ -1297,7 +1297,7 @@ class TestFix:
                     "version": "1.0",
                 }
             },
-            "repo2": {
+            "owner2/repo2": {
                 "font2.ttf": {
                     "filename": "font2.ttf",
                     "hash": "hash2",
@@ -1309,32 +1309,32 @@ class TestFix:
         with patch("main.load_installed_data", return_value=installed_data):
             result = runner.invoke(app, ["fix"])
             assert result.exit_code == 0
-            assert "No duplicates found." in result.output
+            assert "No issues found." in result.output
 
     @patch("main.save_installed_data")
     def test_fix_with_duplicates(self, mock_save: MagicMock, runner: CliRunner) -> None:
         installed_data = {
-            "repo1": {
+            "owner1/repo1": {
                 "font1.ttf": {
                     "filename": "font1.ttf",
                     "hash": "hash1",
-                    "type": "ttf",
+                    "type": "static-ttf",
                     "version": "1.0",
                 }
             },
-            "repo2": {
+            "owner2/repo2": {
                 "font1.ttf": {
                     "filename": "font1.ttf",
                     "hash": "hash1",
-                    "type": "ttf",
+                    "type": "static-ttf",
                     "version": "1.0",
                 }
             },
-            "repo3": {
+            "owner3/repo3": {
                 "font2.ttf": {
                     "filename": "font2.ttf",
                     "hash": "hash2",
-                    "type": "ttf",
+                    "type": "static-ttf",
                     "version": "1.0",
                 }
             },
@@ -1342,33 +1342,99 @@ class TestFix:
         with patch("main.load_installed_data", return_value=installed_data):
             result = runner.invoke(app, ["fix"], input="y\n")
             assert result.exit_code == 0
-            assert "Found 1 duplicate filename(s):" in result.output
-            assert "font1.ttf: repo1, repo2" in result.output
+            assert "Found 1 issue(s):" in result.output
+            assert "Remove duplicate font1.ttf from owner2/repo2" in result.output
             assert "Proceed with fixes?" in result.output
-            assert "Removed duplicate font1.ttf from repo2" in result.output
-            assert "Removed empty repo repo2" in result.output
-            assert "Fixed 1 duplicate entries." in result.output
+            assert "Removed duplicate font1.ttf from owner2/repo2" in result.output
+            assert "Fixed 1 issue(s)." in result.output
             mock_save.assert_called_once()
             # Check that repo2 is removed
             saved_data = mock_save.call_args[0][0]
             assert "repo2" not in saved_data
 
     @patch("main.save_installed_data")
-    def test_fix_abort(self, mock_save: MagicMock, runner: CliRunner) -> None:
+    def test_fix_invalid_repo(self, mock_save: MagicMock, runner: CliRunner) -> None:
         installed_data = {
-            "repo1": {
+            "invalidrepo": {
                 "font1.ttf": {
                     "filename": "font1.ttf",
                     "hash": "hash1",
-                    "type": "ttf",
+                    "type": "static-ttf",
                     "version": "1.0",
                 }
             },
-            "repo2": {
+            "owner/repo": {
+                "font2.ttf": {
+                    "filename": "font2.ttf",
+                    "hash": "hash2",
+                    "type": "static-ttf",
+                    "version": "1.0",
+                }
+            },
+        }
+        with patch("main.load_installed_data", return_value=installed_data):
+            result = runner.invoke(app, ["fix"], input="y\n")
+            assert result.exit_code == 0
+            assert "Found 1 issue(s):" in result.output
+            assert "Remove invalid repo: invalidrepo" in result.output
+            assert "Proceed with fixes?" in result.output
+            assert "Removed invalid repo: invalidrepo" in result.output
+            assert "Fixed 1 issue(s)." in result.output
+            mock_save.assert_called_once()
+            saved_data = mock_save.call_args[0][0]
+            assert "invalidrepo" not in saved_data
+            assert "owner/repo" in saved_data
+
+    @patch("main.save_installed_data")
+    def test_fix_invalid_entry(self, mock_save: MagicMock, runner: CliRunner) -> None:
+        installed_data = {
+            "owner/repo": {
                 "font1.ttf": {
                     "filename": "font1.ttf",
                     "hash": "hash1",
-                    "type": "ttf",
+                    "type": "otf",  # mismatch: .ttf but type otf
+                    "version": "1.0",
+                },
+                "font2.otf": {
+                    "filename": "font2.otf",
+                    "hash": "hash2",
+                    "type": "otf",
+                    "version": "1.0",
+                },
+            },
+        }
+        with patch("main.load_installed_data", return_value=installed_data):
+            result = runner.invoke(app, ["fix"], input="y\n")
+            assert result.exit_code == 0
+            assert "Found 1 issue(s):" in result.output
+            assert (
+                "Remove invalid entry: owner/repo/font1.ttf (type/extension mismatch)"
+                in result.output
+            )
+            assert "Proceed with fixes?" in result.output
+            assert "Removed invalid entry: owner/repo/font1.ttf" in result.output
+            assert "Fixed 1 issue(s)." in result.output
+            mock_save.assert_called_once()
+            saved_data = mock_save.call_args[0][0]
+            assert "font1.ttf" not in saved_data["owner/repo"]
+            assert "font2.otf" in saved_data["owner/repo"]
+
+    @patch("main.save_installed_data")
+    def test_fix_abort(self, mock_save: MagicMock, runner: CliRunner) -> None:
+        installed_data = {
+            "owner1/repo1": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash1",
+                    "type": "static-ttf",
+                    "version": "1.0",
+                }
+            },
+            "owner2/repo2": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash1",
+                    "type": "static-ttf",
                     "version": "1.0",
                 }
             },
@@ -1376,7 +1442,8 @@ class TestFix:
         with patch("main.load_installed_data", return_value=installed_data):
             result = runner.invoke(app, ["fix"], input="n\n")
             assert result.exit_code == 0
-            assert "Found 1 duplicate filename(s):" in result.output
+            assert "Found 1 issue(s):" in result.output
+            assert "Remove duplicate font1.ttf from owner2/repo2" in result.output
             assert "Proceed with fixes?" in result.output
             assert "Aborted." in result.output
             mock_save.assert_not_called()
@@ -1389,7 +1456,7 @@ class TestFix:
         installed_file.parent.mkdir(parents=True, exist_ok=True)
         installed_file.write_text("{}")
         installed_data = {
-            "repo1": {
+            "owner/repo": {
                 "font1.ttf": {
                     "filename": "font1.ttf",
                     "hash": "hash1",

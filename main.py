@@ -1179,11 +1179,49 @@ def fix(
             console.print(f"[red]Failed to create backup: {e}[/red]")
             raise typer.Exit(1) from e
 
+    action_messages: List[str] = []
+    invalid_repos: List[str] = []
+    invalid_entries: List[Tuple[str, str]] = []
+
+    # Detect invalid repos
+    invalid_repos = []
+    for repo in installed_data.keys():
+        try:
+            parse_repo(repo)
+        except ValueError:
+            invalid_repos.append(repo)
+            action_messages.append(f"Remove invalid repo: {repo}")
+
+    # Detect type/extension mismatches
+    type_to_ext = {
+        "variable-ttf": ".ttf",
+        "static-ttf": ".ttf",
+        "otf": ".otf",
+        "variable-woff": ".woff",
+        "static-woff": ".woff",
+        "variable-woff2": ".woff2",
+        "static-woff2": ".woff2",
+    }
+    invalid_entries = []
+    for repo, fonts in installed_data.items():
+        if repo in invalid_repos:
+            continue  # Will be removed anyway
+        for filename, entry in fonts.items():
+            expected_ext = type_to_ext.get(entry["type"])
+            if expected_ext and not filename.endswith(expected_ext):
+                invalid_entries.append((repo, filename))
+                action_messages.append(
+                    f"Remove invalid entry: {repo}/{filename} (type/extension mismatch)"
+                )
+
     # Detect duplicates: filename -> list of repos
     filename_to_repos: Dict[str, List[str]] = defaultdict(list)
     for repo, fonts in installed_data.items():
+        if repo in invalid_repos:
+            continue
         for filename in fonts.keys():
-            filename_to_repos[filename].append(repo)
+            if (repo, filename) not in invalid_entries:
+                filename_to_repos[filename].append(repo)
 
     duplicates = {
         filename: repos
@@ -1191,35 +1229,60 @@ def fix(
         if len(repos) > 1
     }
 
-    if not duplicates:
-        console.print("[green]No duplicates found.[/green]")
+    # Collect actions for duplicates
+    for filename, repos in duplicates.items():
+        for repo in repos[1:]:
+            action_messages.append(f"Remove duplicate {filename} from {repo}")
+
+    if not action_messages:
+        console.print("[green]No issues found.[/green]")
         return
 
-    console.print(f"[yellow]Found {len(duplicates)} duplicate filename(s):[/yellow]")
-    for filename, repos in duplicates.items():
-        console.print(f"  {filename}: {', '.join(repos)}")
+    console.print(f"[yellow]Found {len(action_messages)} issue(s):[/yellow]")
+    for msg in action_messages:
+        console.print(f"  {msg}")
 
     if not typer.confirm("Proceed with fixes?", default=True):
         console.print("[blue]Aborted.[/blue]")
         return
 
-    # Remove duplicates: keep in the first repo, remove from others
-    removed_count = 0
-    for filename, repos in duplicates.items():
-        for repo in repos[1:]:
-            if filename in installed_data[repo]:
-                del installed_data[repo][filename]
-                removed_count += 1
-                console.print(
-                    f"[green]Removed duplicate {filename} from {repo}[/green]"
-                )
+    # Fix issues
+    fixed_count = 0
+
+    # Remove invalid repos
+    for repo in invalid_repos:
+        font_count = len(installed_data[repo])
+        del installed_data[repo]
+        console.print(f"[green]Removed invalid repo: {repo}[/green]")
+        fixed_count += font_count
+
+    # Remove invalid entries
+    for repo, filename in invalid_entries:
+        if repo in installed_data and filename in installed_data[repo]:
+            del installed_data[repo][filename]
+            console.print(f"[green]Removed invalid entry: {repo}/{filename}[/green]")
+            fixed_count += 1
             # If repo now empty, remove it
             if not installed_data[repo]:
                 del installed_data[repo]
                 console.print(f"[green]Removed empty repo {repo}[/green]")
 
+    # Remove duplicates: keep in the first repo, remove from others
+    for filename, repos in duplicates.items():
+        for repo in repos[1:]:
+            if repo in installed_data and filename in installed_data[repo]:
+                del installed_data[repo][filename]
+                console.print(
+                    f"[green]Removed duplicate {filename} from {repo}[/green]"
+                )
+                fixed_count += 1
+                # If repo now empty, remove it
+                if not installed_data[repo]:
+                    del installed_data[repo]
+                    console.print(f"[green]Removed empty repo {repo}[/green]")
+
     save_installed_data(installed_data)
-    console.print(f"[green]Fixed {removed_count} duplicate entries.[/green]")
+    console.print(f"[green]Fixed {fixed_count} issue(s).[/green]")
 
 
 @cache_app.command("purge")
