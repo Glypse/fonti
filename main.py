@@ -17,6 +17,23 @@ app = typer.Typer()
 console = Console()
 
 
+# Constants
+ARCHIVE_EXTENSIONS = [".zip", ".tar.xz", ".tar.gz", ".tgz"]
+VALID_FORMATS = [
+    "variable-ttf",
+    "otf",
+    "static-ttf",
+    "variable-woff2",
+    "variable-woff",
+    "static-woff2",
+    "static-woff",
+]
+DEFAULT_PRIORITIES = ["variable-ttf", "otf", "static-ttf"]
+DEFAULT_PATH = Path.home() / "Library" / "Fonts"
+CONFIG_FILE = Path.home() / ".fontpm" / "config"
+INSTALLED_FILE = Path.home() / ".fontpm" / "installed.json"
+
+
 class Asset(TypedDict):
     name: str
     size: int
@@ -37,92 +54,136 @@ class ExportedFontEntry(TypedDict):
 
 
 def get_base_and_ext(name: str) -> tuple[str, str]:
-    archive_extensions = [".zip", ".tar.xz", ".tar.gz", ".tgz"]
-    for ext in archive_extensions:
+    for ext in ARCHIVE_EXTENSIONS:
         if name.endswith(ext):
             return name[: -len(ext)], ext
     return name, ""
 
 
 # Load default format from config file
-default_priorities = ["variable-ttf", "otf", "static-ttf"]
-default_path = Path.home() / "Library" / "Fonts"
-config_file = Path.home() / ".fontpm" / "config"
+def load_config() -> Tuple[List[str], Path]:
+    """Load configuration from config file."""
+    priorities = DEFAULT_PRIORITIES.copy()
+    path = DEFAULT_PATH
 
-if config_file.exists():
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE) as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("format="):
+                        value = line.split("=", 1)[1].strip()
+                        if value == "auto":
+                            continue
+                        parsed_priorities = [p.strip() for p in value.split(",")]
+                        if all(
+                            p in ["variable-ttf", "otf", "static-ttf"]
+                            for p in parsed_priorities
+                        ):
+                            priorities = parsed_priorities
+                    elif line.startswith("path="):
+                        value = line.split("=", 1)[1].strip()
+                        if value:
+                            path = Path(value)
+        except Exception:
+            console.print("[yellow]Warning: Could not load config file.[/yellow]")
+
+    return priorities, path
+
+
+default_priorities, default_path = load_config()
+
+
+def load_installed_data() -> Dict[str, Dict[str, FontEntry]]:
+    """Load installed fonts data from file."""
+    if not INSTALLED_FILE.exists():
+        return {}
     try:
-        with open(config_file) as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("format="):
-                    value = line.split("=", 1)[1].strip()
-                    if value == "auto":
-                        continue
-                    priorities = [p.strip() for p in value.split(",")]
-                    if all(
-                        p in ["variable-ttf", "otf", "static-ttf"] for p in priorities
-                    ):
-                        default_priorities = priorities
-                elif line.startswith("path="):
-                    value = line.split("=", 1)[1].strip()
-                    if value:
-                        default_path = Path(value)
-    except Exception:
-        pass  # Ignore config errors
+        with open(INSTALLED_FILE) as f:
+            return json.load(f)
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not load installed data: {e}[/yellow]")
+        return {}
 
 
-def is_variable_font(font_path: str) -> bool:
-    """
-    Check if a font file is a variable font.
-    """
-    font = TTFont(font_path)
-    return "fvar" in font
+def save_installed_data(data: Dict[str, Dict[str, FontEntry]]) -> None:
+    """Save installed fonts data to file."""
+    INSTALLED_FILE.parent.mkdir(exist_ok=True)
+    try:
+        with open(INSTALLED_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not save installed data: {e}[/yellow]")
 
 
-def install_single_repo(
-    owner: str,
-    repo_name: str,
-    release: str,
-    priorities: list[str],
-    dest_dir: Path,
-    local: bool,
-    force: bool,
-    keep_multiple: bool,
-) -> None:
-    repo_arg = f"{owner}/{repo_name}"
-    console.print(f"[bold]Installing from {repo_arg}...[/bold]")
+def parse_repo(repo_arg: str) -> Tuple[str, str]:
+    """Parse owner/repo string into owner and repo_name."""
+    try:
+        owner, repo_name = repo_arg.split("/")
+        return owner, repo_name
+    except ValueError as e:
+        raise ValueError(f"Invalid repo format: {repo_arg}. Use owner/repo") from e
 
-    # Warn for WOFF/WOFF2 global install
-    if (
-        any(
-            p in ["static-woff", "static-woff2", "variable-woff", "variable-woff2"]
-            for p in priorities
-        )
-        and not local
-        and not force
-    ):
-        console.print(
-            "[yellow]Installing WOFF/WOFF2 fonts globally is not recommended. "
-            "Use --force to proceed.[/yellow]"
-        )
-        return
 
-    if not local:
-        installed_file = Path.home() / ".fontpm" / "installed.json"
-        if installed_file.exists():
-            try:
-                with open(installed_file) as f:
-                    temp_data = json.load(f)
-                if repo_arg in temp_data and temp_data[repo_arg]:
-                    if not force:
-                        console.print(
-                            f"[yellow]Already installed from {repo_arg}. "
-                            "Use --force to reinstall or change version.[/yellow]"
-                        )
-                        return
-            except Exception:
-                pass
+def categorize_fonts(
+    font_files: List[Path],
+) -> Tuple[
+    List[Path], List[Path], List[Path], List[Path], List[Path], List[Path], List[Path]
+]:
+    """Categorize font files into variable/static and by type."""
+    ttf_files = [f for f in font_files if f.suffix.lower() == ".ttf"]
+    otf_files = [f for f in font_files if f.suffix.lower() == ".otf"]
+    woff_files = [f for f in font_files if f.suffix.lower() == ".woff"]
+    woff2_files = [f for f in font_files if f.suffix.lower() == ".woff2"]
 
+    variable_ttfs: List[Path] = []
+    static_ttfs: List[Path] = []
+    for ttf in ttf_files:
+        try:
+            if is_variable_font(str(ttf)):
+                variable_ttfs.append(ttf)
+            else:
+                static_ttfs.append(ttf)
+        except Exception:
+            static_ttfs.append(ttf)
+
+    variable_woffs: List[Path] = []
+    static_woffs: List[Path] = []
+    for woff in woff_files:
+        try:
+            if is_variable_font(str(woff)):
+                variable_woffs.append(woff)
+            else:
+                static_woffs.append(woff)
+        except Exception:
+            static_woffs.append(woff)
+
+    variable_woff2s: List[Path] = []
+    static_woff2s: List[Path] = []
+    for woff2 in woff2_files:
+        try:
+            if is_variable_font(str(woff2)):
+                variable_woff2s.append(woff2)
+            else:
+                static_woff2s.append(woff2)
+        except Exception:
+            static_woff2s.append(woff2)
+
+    return (
+        variable_ttfs,
+        static_ttfs,
+        otf_files,
+        variable_woffs,
+        static_woffs,
+        variable_woff2s,
+        static_woff2s,
+    )
+
+
+def fetch_release_info(
+    owner: str, repo_name: str, release: str
+) -> Tuple[str, List[Asset]]:
+    """Fetch release information from GitHub API."""
     with console.status("[bold green]Fetching release info..."):
         if release == "latest":
             url = f"https://api.github.com/repos/{owner}/{repo_name}/releases/latest"
@@ -147,17 +208,17 @@ def install_single_repo(
 
         release_data: Dict[str, Any] = response.json()
         version = release_data["tag_name"]
+        assets: List[Asset] = release_data.get("assets", [])
+        return version, assets
 
-    assets: List[Asset] = release_data.get("assets", [])
-    archive_extensions = [".zip", ".tar.xz", ".tar.gz", ".tgz"]
+
+def select_archive_asset(assets: List[Asset]) -> Asset:
+    """Select the best archive asset from the list."""
     archives = [
-        a for a in assets if any(a["name"].endswith(ext) for ext in archive_extensions)
+        a for a in assets if any(a["name"].endswith(ext) for ext in ARCHIVE_EXTENSIONS)
     ]
     if not archives:
-        console.print(
-            f"[red]No archive asset found in the release for {repo_arg}.[/red]"
-        )
-        return
+        raise ValueError("No archive asset found in the release.")
 
     # Function to get priority for extensions (lower is better)
     def get_priority(ext: str) -> int:
@@ -176,9 +237,9 @@ def install_single_repo(
         if len(items) == 1:
             best_assets.append(items[0][0])
         else:
-            # Sort by size ascending, then by priority ascending
+            # Sort by priority ascending, then by size ascending
             sorted_items = sorted(
-                items, key=lambda x: (x[0]["size"], get_priority(x[1]))
+                items, key=lambda x: (get_priority(x[1]), x[0]["size"])
             )
             best_assets.append(sorted_items[0][0])
 
@@ -188,33 +249,11 @@ def install_single_repo(
             key=lambda a: (a["size"], get_priority(get_base_and_ext(a["name"])[1]))
         )
 
-    chosen_asset = best_assets[0]
-    archive_url: str = chosen_asset["browser_download_url"]
-    archive_name: str = chosen_asset["name"]
-    _, archive_ext = get_base_and_ext(archive_name)
+    return best_assets[0]
 
-    console.print(f"Found archive: {archive_name}")
 
-    if not local:
-        installed_file = Path.home() / ".fontpm" / "installed.json"
-        if installed_file.exists():
-            try:
-                with open(installed_file) as f:
-                    temp_data = json.load(f)
-                installed_types = [
-                    entry.get("type")
-                    for entry in temp_data.get(repo_arg, {}).values()
-                    if "type" in entry
-                ]
-                if installed_types and not keep_multiple and not force:
-                    console.print(
-                        f"[yellow]Already installed other types from {repo_arg}. "
-                        "Use --keep-multiple to install additional types or --force to overwrite.[/yellow]"
-                    )
-                    return
-            except Exception:
-                pass
-
+def download_and_extract_archive(archive_url: str, archive_ext: str) -> Path:
+    """Download and extract the archive to a temporary directory."""
     with tempfile.TemporaryDirectory() as temp_dir:
         extract_dir = Path(temp_dir)
 
@@ -244,159 +283,220 @@ def install_single_repo(
                     with tarfile.open(tmp_path, mode) as archive_ref:
                         archive_ref.extractall(extract_dir)
 
-        # Find all font files
-        ttf_files = list(extract_dir.rglob("*.ttf"))
-        otf_files = list(extract_dir.rglob("*.otf"))
-        woff_files = list(extract_dir.rglob("*.woff"))
-        woff2_files = list(extract_dir.rglob("*.woff2"))
+        return extract_dir
 
-        variable_ttfs: list[Path] = []
-        static_ttfs: list[Path] = []
-        for ttf in ttf_files:
+
+def select_fonts(
+    categorized_fonts: Tuple[List[Path], ...], priorities: List[str]
+) -> Tuple[List[Path], str]:
+    """Select fonts based on priorities."""
+    (
+        variable_ttfs,
+        static_ttfs,
+        otf_files,
+        variable_woffs,
+        static_woffs,
+        variable_woff2s,
+        static_woff2s,
+    ) = categorized_fonts
+
+    selected_fonts: List[Path] = []
+    selected_pri = ""
+    for pri in priorities:
+        if pri == "variable-woff2" and variable_woff2s:
+            selected_fonts = variable_woff2s
+            selected_pri = pri
+            break
+        elif pri == "static-woff2" and static_woff2s:
+            selected_fonts = static_woff2s
+            selected_pri = pri
+            break
+        elif pri == "variable-woff" and variable_woffs:
+            selected_fonts = variable_woffs
+            selected_pri = pri
+            break
+        elif pri == "static-woff" and static_woffs:
+            selected_fonts = static_woffs
+            selected_pri = pri
+            break
+        elif pri == "variable-ttf" and variable_ttfs:
+            selected_fonts = variable_ttfs
+            selected_pri = pri
+            break
+        elif pri == "otf" and otf_files:
+            selected_fonts = otf_files
+            selected_pri = pri
+            break
+        elif pri == "static-ttf" and static_ttfs:
+            selected_fonts = static_ttfs
+            selected_pri = pri
+            break
+
+    return selected_fonts, selected_pri
+
+
+def install_fonts(
+    selected_fonts: List[Path],
+    dest_dir: Path,
+    repo_arg: str,
+    version: str,
+    selected_pri: str,
+    local: bool,
+) -> None:
+    """Install selected fonts to destination directory and update installed data."""
+    if not selected_fonts:
+        console.print(
+            f"[yellow]No font files found in the archive for {repo_arg}.[/yellow]"
+        )
+        return
+
+    with console.status("[bold green]Moving fonts..."):
+        for font_file in selected_fonts:
+            shutil.move(str(font_file), str(dest_dir / font_file.name))
+
+    if not local:
+        installed_data = load_installed_data()
+        repo_key = repo_arg
+        if repo_key not in installed_data:
+            installed_data[repo_key] = {}
+        for font_file in selected_fonts:
             try:
-                if is_variable_font(str(ttf)):
-                    variable_ttfs.append(ttf)
-                else:
-                    static_ttfs.append(ttf)
-            except Exception:
-                # If can't check, treat as static
-                static_ttfs.append(ttf)
-
-        variable_woffs: list[Path] = []
-        static_woffs: list[Path] = []
-        for woff in woff_files:
-            try:
-                if is_variable_font(str(woff)):
-                    variable_woffs.append(woff)
-                else:
-                    static_woffs.append(woff)
-            except Exception:
-                static_woffs.append(woff)
-
-        variable_woff2s: list[Path] = []
-        static_woff2s: list[Path] = []
-        for woff2 in woff2_files:
-            try:
-                if is_variable_font(str(woff2)):
-                    variable_woff2s.append(woff2)
-                else:
-                    static_woff2s.append(woff2)
-            except Exception:
-                static_woff2s.append(woff2)
-
-        # Select fonts in order of preference
-        selected_fonts: list[Path] = []
-        selected_pri = None
-        for pri in priorities:
-            if pri == "variable-woff2" and variable_woff2s:
-                selected_fonts = variable_woff2s
-                selected_pri = pri
-                break
-            elif pri == "static-woff2" and static_woff2s:
-                selected_fonts = static_woff2s
-                selected_pri = pri
-                break
-            elif pri == "variable-woff" and variable_woffs:
-                selected_fonts = variable_woffs
-                selected_pri = pri
-                break
-            elif pri == "static-woff" and static_woffs:
-                selected_fonts = static_woffs
-                selected_pri = pri
-                break
-            elif pri == "variable-ttf" and variable_ttfs:
-                selected_fonts = variable_ttfs
-                selected_pri = pri
-                break
-            elif pri == "otf" and otf_files:
-                selected_fonts = otf_files
-                selected_pri = pri
-                break
-            elif pri == "static-ttf" and static_ttfs:
-                selected_fonts = static_ttfs
-                selected_pri = pri
-                break
-
-        installed_data: Dict[str, Dict[str, FontEntry]] = {}
-
-        if selected_fonts and not local:
-            installed_file = Path.home() / ".fontpm" / "installed.json"
-            if installed_file.exists():
-                try:
-                    with open(installed_file) as f:
-                        temp_data = json.load(f)
-                    installed_types = [
-                        entry.get("type")
-                        for entry in temp_data.get(repo_arg, {}).values()
-                        if "type" in entry
-                    ]
-                    should_skip = False
-                    if selected_pri in installed_types:
-                        if not force:
-                            console.print(
-                                f"[yellow]Already installed {selected_pri} from {repo_arg}. "
-                                "Use --force to reinstall.[/yellow]"
-                            )
-                            should_skip = True
-                    if should_skip:
-                        return
-                except Exception:
-                    pass
-
-        # Track installed fonts for global installs
-        if selected_fonts and not local:
-            installed_file = Path.home() / ".fontpm" / "installed.json"
-            installed_file.parent.mkdir(exist_ok=True)
-            installed_data: Dict[str, Dict[str, FontEntry]] = {}
-            if installed_file.exists():
-                try:
-                    with open(installed_file) as f:
-                        installed_data = json.load(f)
-                except Exception:
-                    pass  # Ignore load errors
-
-            repo_key = repo_arg
-            if repo_key not in installed_data or force:
-                installed_data[repo_key] = {}
-            for font_file in selected_fonts:
-                try:
-                    file_hash = hashlib.sha256(font_file.read_bytes()).hexdigest()
-                    assert selected_pri is not None
-                    entry: FontEntry = {
-                        "filename": font_file.name,
-                        "hash": file_hash,
-                        "type": selected_pri,
-                        "version": version,
-                    }
-                    installed_data[repo_key][font_file.name] = entry
-                except Exception as e:
-                    console.print(
-                        f"[yellow]Warning: Could not hash {font_file.name}: {e}[/yellow]"
-                    )
-
-            try:
-                with open(installed_file, "w") as f:
-                    json.dump(installed_data, f, indent=2)
+                file_hash = hashlib.sha256(
+                    (dest_dir / font_file.name).read_bytes()
+                ).hexdigest()
+                entry: FontEntry = {
+                    "filename": font_file.name,
+                    "hash": file_hash,
+                    "type": selected_pri,
+                    "version": version,
+                }
+                installed_data[repo_key][font_file.name] = entry
             except Exception as e:
                 console.print(
-                    f"[yellow]Warning: Could not save install data: {e}[/yellow]"
+                    f"[yellow]Warning: Could not hash {font_file.name}: {e}[/yellow]"
                 )
+        save_installed_data(installed_data)
 
-        if selected_fonts:
-            with console.status("[bold green]Moving fonts..."):
-                for font_file in selected_fonts:
-                    shutil.move(str(font_file), str(dest_dir / font_file.name))
-            if not local and repo_arg in installed_data:
-                number_installed_fonts = len(installed_data[repo_arg])
-            else:
-                number_installed_fonts = len(selected_fonts)
+    number_installed_fonts = len(selected_fonts)
+    console.print(
+        f"[green]Moved {number_installed_fonts} font{'' if number_installed_fonts == 1 else 's'} from "
+        f"{repo_arg} to: {dest_dir}[/green]"
+    )
+
+
+def is_variable_font(font_path: str) -> bool:
+    """
+    Check if a font file is a variable font.
+    """
+    font = TTFont(font_path)
+    return "fvar" in font
+
+
+def install_single_repo(
+    owner: str,
+    repo_name: str,
+    release: str,
+    priorities: list[str],
+    dest_dir: Path,
+    local: bool,
+    force: bool,
+    keep_multiple: bool,
+) -> None:
+    """
+    Install fonts from a single GitHub repository.
+
+    Args:
+        owner: Repository owner
+        repo_name: Repository name
+        release: Release tag or 'latest'
+        priorities: List of font format priorities
+        dest_dir: Destination directory for fonts
+        local: Whether to install locally (not globally)
+        force: Whether to force reinstall
+        keep_multiple: Whether to allow multiple font types
+    """
+    repo_arg = f"{owner}/{repo_name}"
+    console.print(f"[bold]Installing from {repo_arg}...[/bold]")
+
+    # Warn for WOFF/WOFF2 global install
+    if (
+        any(
+            p in ["static-woff", "static-woff2", "variable-woff", "variable-woff2"]
+            for p in priorities
+        )
+        and not local
+        and not force
+    ):
+        console.print(
+            "[yellow]Installing WOFF/WOFF2 fonts globally is not recommended. "
+            "Use --force to proceed.[/yellow]"
+        )
+        return
+
+    # Check if already installed
+    if not local:
+        installed_data = load_installed_data()
+        if repo_arg in installed_data and installed_data[repo_arg] and not force:
             console.print(
-                f"[green]Moved {number_installed_fonts} font{'' if number_installed_fonts == 1 else 's'} from "
-                f"{repo_arg} to: {dest_dir}[/green]"
+                f"[yellow]Already installed from {repo_arg}. "
+                "Use --force to reinstall or change version.[/yellow]"
             )
-        else:
-            msg = f"[yellow]No font files found in the archive for {repo_arg}.[/yellow]"
-            console.print(msg)
+            return
+
+        installed_types = [
+            entry.get("type")
+            for entry in installed_data.get(repo_arg, {}).values()
+            if "type" in entry
+        ]
+        if installed_types and not keep_multiple and not force:
+            console.print(
+                f"[yellow]Already installed other types from {repo_arg}. "
+                "Use --keep-multiple to install additional types or --force to overwrite.[/yellow]"
+            )
+            return
+
+    try:
+        version, assets = fetch_release_info(owner, repo_name, release)
+        chosen_asset = select_archive_asset(assets)
+        archive_url = chosen_asset["browser_download_url"]
+        archive_name = chosen_asset["name"]
+        _, archive_ext = get_base_and_ext(archive_name)
+
+        console.print(f"Found archive: {archive_name}")
+
+        extract_dir = download_and_extract_archive(archive_url, archive_ext)
+
+        # Find all font files
+        font_files = (
+            list(extract_dir.rglob("*.ttf"))
+            + list(extract_dir.rglob("*.otf"))
+            + list(extract_dir.rglob("*.woff"))
+            + list(extract_dir.rglob("*.woff2"))
+        )
+
+        categorized_fonts = categorize_fonts(font_files)
+        selected_fonts, selected_pri = select_fonts(categorized_fonts, priorities)
+
+        # Check for type conflict
+        if selected_fonts and not local:
+            installed_data = load_installed_data()
+            installed_types = [
+                entry.get("type")
+                for entry in installed_data.get(repo_arg, {}).values()
+                if "type" in entry
+            ]
+            if selected_pri in installed_types and not force:
+                console.print(
+                    f"[yellow]Already installed {selected_pri} from {repo_arg}. "
+                    "Use --force to reinstall.[/yellow]"
+                )
+                return
+
+        install_fonts(selected_fonts, dest_dir, repo_arg, version, selected_pri, local)
+
+    except Exception as e:
+        console.print(f"[red]Error installing from {repo_arg}: {e}[/red]")
+        raise
 
 
 @app.command()
@@ -431,19 +531,10 @@ def install(
     Install fonts from a GitHub release.
     """
     priorities = [p.strip() for p in format.split(",")]
-    valid_formats = [
-        "variable-ttf",
-        "otf",
-        "static-ttf",
-        "variable-woff2",
-        "variable-woff",
-        "static-woff2",
-        "static-woff",
-    ]
-    if not priorities or not all(p in valid_formats for p in priorities):
+    if not priorities or not all(p in VALID_FORMATS for p in priorities):
         console.print(
             "[red]Invalid --format value. Must be comma-separated list of: "
-            f"{', '.join(valid_formats)}[/red]"
+            f"{', '.join(VALID_FORMATS)}[/red]"
         )
         raise typer.Exit(1)
 
@@ -452,16 +543,16 @@ def install(
 
     for repo_arg in repo:
         try:
-            owner, repo_name = repo_arg.split("/")
-        except ValueError:
-            console.print(f"[red]Invalid repo format: {repo_arg}. Use owner/repo[/red]")
+            owner, repo_name = parse_repo(repo_arg)
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
             continue
         install_single_repo(
             owner,
             repo_name,
             release,
             priorities,
-            Path.cwd() if local else default_path,
+            dest_dir,
             local,
             force,
             keep_multiple,
@@ -480,29 +571,20 @@ def config(
     """
     # Load existing config
     current_config: Dict[str, str] = {}
-    if config_file.exists():
+    if CONFIG_FILE.exists():
         try:
-            with open(config_file) as f:
+            with open(CONFIG_FILE) as f:
                 for line in f:
                     line = line.strip()
                     if "=" in line:
                         k, v = line.split("=", 1)
                         current_config[k] = v
         except Exception:
-            pass  # Ignore read errors
+            console.print("[yellow]Warning: Could not load existing config.[/yellow]")
 
     if key == "format":
         priorities = [p.strip() for p in value.split(",")]
-        valid = [
-            "variable-ttf",
-            "otf",
-            "static-ttf",
-            "variable-woff2",
-            "variable-woff",
-            "static-woff2",
-            "static-woff",
-        ]
-        if not all(p in valid for p in priorities):
+        if not all(p in VALID_FORMATS for p in priorities):
             console.print(f"[red]Invalid format values: {value}[/red]")
             raise typer.Exit(1)
         current_config["format"] = value
@@ -516,7 +598,7 @@ def config(
 
     # Write back all config
     try:
-        with open(config_file, "w") as f:
+        with open(CONFIG_FILE, "w") as f:
             for k, v in current_config.items():
                 f.write(f"{k}={v}\n")
     except Exception as e:
@@ -536,17 +618,10 @@ def uninstall(
     """
     Uninstall fonts from a GitHub repository.
     """
-    installed_file = Path.home() / ".fontpm" / "installed.json"
-    if not installed_file.exists():
+    installed_data = load_installed_data()
+    if not installed_data:
         console.print("[yellow]No installed fonts data found.[/yellow]")
         return
-
-    try:
-        with open(installed_file) as f:
-            installed_data: Dict[str, Dict[str, FontEntry]] = json.load(f)
-    except Exception as e:
-        console.print(f"[red]Error loading installed data: {e}[/red]")
-        raise typer.Exit(1) from e
 
     dest_dir = default_path
     deleted_count = 0
@@ -594,11 +669,7 @@ def uninstall(
         else:
             del installed_data[repo_arg]
 
-    try:
-        with open(installed_file, "w") as f:
-            json.dump(installed_data, f, indent=2)
-    except Exception as e:
-        console.print(f"[yellow]Warning: Could not update installed data: {e}[/yellow]")
+    save_installed_data(installed_data)
 
     console.print(
         f"[green]Uninstalled {deleted_count} font{'' if deleted_count == 1 else 's'}.[/green]"
@@ -632,17 +703,10 @@ def update(
     """
     Update installed fonts to the latest versions.
     """
-    installed_file = Path.home() / ".fontpm" / "installed.json"
-    if not installed_file.exists():
+    installed_data = load_installed_data()
+    if not installed_data:
         console.print("[yellow]No installed fonts data found.[/yellow]")
         return
-
-    try:
-        with open(installed_file) as f:
-            installed_data: Dict[str, Dict[str, FontEntry]] = json.load(f)
-    except Exception as e:
-        console.print(f"[red]Error loading installed data: {e}[/red]")
-        raise typer.Exit(1) from e
 
     from packaging.version import Version
 
@@ -668,9 +732,9 @@ def update(
         installed_version = list(fonts.values())[0]["version"]
 
         try:
-            owner, repo_name = repo_arg.split("/")
-        except ValueError:
-            console.print(f"[red]Invalid repo format in data: {repo_arg}[/red]")
+            owner, repo_name = parse_repo(repo_arg)
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
             continue
 
         try:
@@ -732,13 +796,7 @@ def update(
         # Remove from data
         del installed_data[repo_arg]
         # Save
-        try:
-            with open(installed_file, "w") as f:
-                json.dump(installed_data, f, indent=2)
-        except Exception as e:
-            console.print(
-                f"[yellow]Warning: Could not update installed data: {e}[/yellow]"
-            )
+        save_installed_data(installed_data)
         # Install new
         install_single_repo(
             owner,
@@ -776,17 +834,10 @@ def export(
     """
     Export the installed font library to a shareable file.
     """
-    installed_file = Path.home() / ".fontpm" / "installed.json"
-    if not installed_file.exists():
+    data = load_installed_data()
+    if not data:
         console.print("[yellow]No installed fonts data found.[/yellow]")
         return
-
-    try:
-        with open(installed_file) as f:
-            data: Dict[str, Dict[str, FontEntry]] = json.load(f)
-    except Exception as e:
-        console.print(f"[red]Error loading installed data: {e}[/red]")
-        raise typer.Exit(1) from e
 
     exported: Dict[str, Dict[str, ExportedFontEntry]] = {}
     for repo, fonts in data.items():

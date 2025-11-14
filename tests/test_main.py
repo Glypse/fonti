@@ -1,13 +1,13 @@
 import json
 import tempfile
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, List, Tuple, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
 
-from main import app
+from main import DEFAULT_PATH, DEFAULT_PRIORITIES, Asset, app, load_config
 
 
 @pytest.fixture
@@ -39,13 +39,13 @@ class TestConfig:
     def test_config_format_valid(
         self, runner: CliRunner, mock_config_file: Path
     ) -> None:
-        with patch("main.config_file", mock_config_file):
+        with patch("main.CONFIG_FILE", mock_config_file):
             result = runner.invoke(app, ["config", "format", "variable-ttf,otf"])
             assert result.exit_code == 0
             assert "Set default format to: variable-ttf,otf" in result.output
 
     def test_config_path_valid(self, runner: CliRunner, mock_config_file: Path) -> None:
-        with patch("main.config_file", mock_config_file):
+        with patch("main.CONFIG_FILE", mock_config_file):
             result = runner.invoke(app, ["config", "path", "/some/path"])
             assert result.exit_code == 0
             assert "Set default path to: /some/path" in result.output
@@ -54,6 +54,59 @@ class TestConfig:
         result = runner.invoke(app, ["config", "invalid", "value"])
         assert result.exit_code == 1
         assert "Unknown config key: invalid" in result.output
+
+
+class TestConfigLoading:
+    def test_load_config_no_file(self, temp_dir: Path) -> None:
+        with patch("main.CONFIG_FILE", temp_dir / "nonexistent"):
+            priorities, path = load_config()
+            assert priorities == DEFAULT_PRIORITIES
+            assert path == DEFAULT_PATH
+
+    def test_load_config_valid_format(self, temp_dir: Path) -> None:
+        config_file = temp_dir / "config"
+        config_file.write_text("format=otf,variable-ttf\npath=/custom/path\n")
+        with patch("main.CONFIG_FILE", config_file):
+            priorities, path = load_config()
+            assert priorities == ["otf", "variable-ttf"]
+            assert path == Path("/custom/path")
+
+    def test_load_config_invalid_format(self, temp_dir: Path) -> None:
+        config_file = temp_dir / "config"
+        config_file.write_text("format=invalid,format\n")
+        with patch("main.CONFIG_FILE", config_file):
+            priorities, path = load_config()
+            assert priorities == DEFAULT_PRIORITIES  # Should fallback to default
+            assert path == DEFAULT_PATH
+
+    def test_load_config_auto_format(self, temp_dir: Path) -> None:
+        config_file = temp_dir / "config"
+        config_file.write_text("format=auto\n")
+        with patch("main.CONFIG_FILE", config_file):
+            priorities, path = load_config()
+            assert priorities == DEFAULT_PRIORITIES  # auto should be ignored
+            assert path == DEFAULT_PATH
+
+    def test_load_config_empty_path(self, temp_dir: Path) -> None:
+        config_file = temp_dir / "config"
+        config_file.write_text("path=\n")
+        with patch("main.CONFIG_FILE", config_file):
+            priorities, path = load_config()
+            assert priorities == DEFAULT_PRIORITIES
+            assert path == DEFAULT_PATH  # empty path should be ignored
+
+    def test_load_config_file_error(self, temp_dir: Path) -> None:
+        config_file = temp_dir / "config"
+        config_file.write_text("invalid content that causes error")
+        # Make the file unreadable or something, but for now, since the parsing is robust, it should work.
+        # Actually, the code catches all exceptions, so to test the error, I can patch open to raise.
+        with (
+            patch("main.CONFIG_FILE", config_file),
+            patch("builtins.open", side_effect=Exception("File error")),
+        ):
+            priorities, path = load_config()
+            assert priorities == DEFAULT_PRIORITIES
+            assert path == DEFAULT_PATH
 
 
 class TestIsVariable:
@@ -80,45 +133,38 @@ class TestIsVariable:
 
 
 class TestExport:
-    def test_export_no_installed_file(
-        self, runner: CliRunner, mock_installed_file: Path
-    ) -> None:
-        with patch("main.Path.home") as mock_home:
-            mock_home.return_value = mock_installed_file.parent.parent
+    def test_export_no_installed_file(self, runner: CliRunner) -> None:
+        with patch("main.load_installed_data", return_value={}):
             result = runner.invoke(app, ["export"])
             assert result.exit_code == 0
             assert "No installed fonts data found." in result.output
 
-    def test_export_stdout(self, runner: CliRunner, mock_installed_file: Path) -> None:
+    def test_export_stdout(self, runner: CliRunner) -> None:
         installed_data = {
             "repo1": {
                 "font1.ttf": {"filename": "font1.ttf", "type": "ttf", "version": "1.0"}
             }
         }
-        mock_installed_file.write_text(json.dumps(installed_data))
-        with patch("main.Path.home") as mock_home:
-            mock_home.return_value = mock_installed_file.parent.parent
+        with patch("main.load_installed_data", return_value=installed_data):
             result = runner.invoke(app, ["export", "--stdout"])
             assert result.exit_code == 0
             assert "font1.ttf" in result.output
 
-    def test_export_to_file(
-        self, runner: CliRunner, mock_installed_file: Path, temp_dir: Path
-    ) -> None:
+    def test_export_to_file(self, runner: CliRunner, temp_dir: Path) -> None:
         installed_data = {
             "repo1": {
                 "font1.ttf": {"filename": "font1.ttf", "type": "ttf", "version": "1.0"}
             }
         }
-        mock_installed_file.write_text(json.dumps(installed_data))
-        output_file = temp_dir / "export.json"
-        with patch("main.Path.home") as mock_home:
-            mock_home.return_value = mock_installed_file.parent.parent
+        with patch("main.load_installed_data", return_value=installed_data):
+            output_file = temp_dir / "export.json"
             result = runner.invoke(app, ["export", "--output", str(output_file)])
             assert result.exit_code == 0
             assert output_file.exists()
             data = json.loads(output_file.read_text())
             assert "repo1" in data
+            assert "Exported to" in result.output
+            assert str(output_file) in result.output
 
 
 class TestImport:
@@ -138,17 +184,24 @@ class TestImport:
         }
         import_file = temp_dir / "import.json"
         import_file.write_text(json.dumps(exported_data))
-        result = runner.invoke(app, ["import", "--input", str(import_file)])
-        assert result.exit_code == 0
-        mock_install.assert_called_once()
+        with patch("main.default_path", Path("/fake/path")):
+            result = runner.invoke(app, ["import", "--input", str(import_file)])
+            assert result.exit_code == 0
+            mock_install.assert_called_once_with(
+                "owner",
+                "repo",
+                "1.0",
+                ["ttf"],
+                Path("/fake/path"),
+                False,
+                False,
+                False,
+            )
 
 
 class TestUninstall:
-    def test_uninstall_no_installed_file(
-        self, runner: CliRunner, mock_installed_file: Path
-    ) -> None:
-        with patch("main.Path.home") as mock_home:
-            mock_home.return_value = mock_installed_file.parent.parent
+    def test_uninstall_no_installed_file(self, runner: CliRunner) -> None:
+        with patch("main.load_installed_data", return_value={}):
             result = runner.invoke(app, ["uninstall", "repo1"])
             assert result.exit_code == 0
             assert "No installed fonts data found." in result.output
@@ -156,13 +209,14 @@ class TestUninstall:
     @patch("pathlib.Path.unlink")
     @patch("pathlib.Path.exists")
     @patch("pathlib.Path.read_bytes")
+    @patch("main.save_installed_data")
     def test_uninstall_success(
         self,
+        mock_save: MagicMock,
         mock_read_bytes: MagicMock,
         mock_exists: MagicMock,
         mock_unlink: MagicMock,
         runner: CliRunner,
-        mock_installed_file: Path,
     ) -> None:
         mock_exists.return_value = True
         mock_read_bytes.return_value = b"dummy data"
@@ -176,44 +230,139 @@ class TestUninstall:
                 }
             }
         }
-        mock_installed_file.write_text(json.dumps(installed_data))
         with (
-            patch("main.Path.home") as mock_home,
+            patch("main.load_installed_data", return_value=installed_data),
             patch("main.default_path", Path("/fake/path")),
             patch("hashlib.sha256") as mock_hash,
         ):
-            mock_home.return_value = mock_installed_file.parent.parent
             mock_hash.return_value.hexdigest.return_value = "hash"
             result = runner.invoke(app, ["uninstall", "repo1"])
             assert result.exit_code == 0
             assert "Deleted font1.ttf" in result.output
             mock_unlink.assert_called_once()
+            # Assert installed_data is updated (repo removed)
+            mock_save.assert_called_once()
+            saved_data = mock_save.call_args[0][0]
+            assert "repo1" not in saved_data
+
+    @patch("pathlib.Path.unlink")
+    @patch("pathlib.Path.exists")
+    @patch("pathlib.Path.read_bytes")
+    def test_uninstall_file_not_found(
+        self,
+        mock_read_bytes: MagicMock,
+        mock_exists: MagicMock,
+        mock_unlink: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        mock_exists.return_value = False
+        mock_read_bytes.return_value = b"dummy data"
+        installed_data = {
+            "repo1": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash",
+                    "type": "ttf",
+                    "version": "1.0",
+                }
+            }
+        }
+        with (
+            patch("main.load_installed_data", return_value=installed_data),
+            patch("main.default_path", Path("/fake/path")),
+            patch("hashlib.sha256") as mock_hash,
+        ):
+            mock_hash.return_value.hexdigest.return_value = "hash"
+            result = runner.invoke(app, ["uninstall", "repo1"])
+            assert result.exit_code == 0
+            assert "Font font1.ttf not found" in result.output
+            mock_unlink.assert_not_called()
+
+    @patch("pathlib.Path.unlink")
+    @patch("pathlib.Path.exists")
+    @patch("pathlib.Path.read_bytes")
+    def test_uninstall_permission_error(
+        self,
+        mock_read_bytes: MagicMock,
+        mock_exists: MagicMock,
+        mock_unlink: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        mock_exists.return_value = True
+        mock_read_bytes.return_value = b"dummy data"
+        mock_unlink.side_effect = PermissionError("Permission denied")
+        installed_data = {
+            "repo1": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash",
+                    "type": "ttf",
+                    "version": "1.0",
+                }
+            }
+        }
+        with (
+            patch("main.load_installed_data", return_value=installed_data),
+            patch("main.default_path", Path("/fake/path")),
+            patch("hashlib.sha256") as mock_hash,
+        ):
+            mock_hash.return_value.hexdigest.return_value = "hash"
+            result = runner.invoke(app, ["uninstall", "repo1"])
+            assert result.exit_code == 0
+            assert "Could not delete font1.ttf: Permission denied" in result.output
+            mock_unlink.assert_called_once()
+
+    @patch("pathlib.Path.unlink")
+    @patch("pathlib.Path.exists")
+    @patch("pathlib.Path.read_bytes")
+    def test_uninstall_hash_mismatch(
+        self,
+        mock_read_bytes: MagicMock,
+        mock_exists: MagicMock,
+        mock_unlink: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        mock_exists.return_value = True
+        mock_read_bytes.return_value = b"modified data"
+        installed_data = {
+            "repo1": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash",
+                    "type": "ttf",
+                    "version": "1.0",
+                }
+            }
+        }
+        with (
+            patch("main.load_installed_data", return_value=installed_data),
+            patch("main.default_path", Path("/fake/path")),
+            patch("hashlib.sha256") as mock_hash,
+        ):
+            mock_hash.return_value.hexdigest.return_value = "different_hash"
+            result = runner.invoke(app, ["uninstall", "repo1"])
+            assert result.exit_code == 0
+            assert "Font font1.ttf has been modified" in result.output
+            mock_unlink.assert_not_called()
 
 
 class TestUpdate:
-    def test_update_no_installed_file(
-        self, runner: CliRunner, mock_installed_file: Path
-    ) -> None:
-        with patch("main.Path.home") as mock_home:
-            mock_home.return_value = mock_installed_file.parent.parent
+    def test_update_no_installed_file(self, runner: CliRunner) -> None:
+        with patch("main.load_installed_data", return_value={}):
             result = runner.invoke(app, ["update"])
             assert result.exit_code == 0
             assert "No installed fonts data found." in result.output
 
     @patch("httpx.get")
     @patch("main.install_single_repo")
-    @patch("pathlib.Path.unlink")
-    @patch("pathlib.Path.exists")
+    @patch("main.save_installed_data")
     def test_update_success(
         self,
-        mock_exists: MagicMock,
-        mock_unlink: MagicMock,
+        mock_save: MagicMock,
         mock_install: MagicMock,
         mock_get: MagicMock,
         runner: CliRunner,
-        mock_installed_file: Path,
     ) -> None:
-        mock_exists.return_value = True
         installed_data = {
             "owner/repo": {
                 "font1.ttf": {
@@ -224,20 +373,214 @@ class TestUpdate:
                 }
             }
         }
-        mock_installed_file.write_text(json.dumps(installed_data))
         mock_response = MagicMock()
         mock_response.json.return_value = {"tag_name": "v2.0"}
         mock_get.return_value = mock_response
         with (
-            patch("main.Path.home") as mock_home,
+            patch("main.load_installed_data", return_value=installed_data),
+            patch("main.default_path", Path("/fake/path")),
+            patch("packaging.version.Version") as mock_version,
+            patch("pathlib.Path.exists", return_value=True) as mock_exists,
+            patch("pathlib.Path.unlink") as mock_unlink,
+        ):
+            mock_version.return_value = MagicMock(__gt__=lambda *_: True)  # type: ignore
+            result = runner.invoke(app, ["update", "owner/repo"])
+            assert result.exit_code == 0
+            assert "Updating owner/repo from 1.0 to v2.0..." in result.output
+            mock_install.assert_called_once_with(
+                "owner",
+                "repo",
+                "latest",
+                ["variable-ttf", "otf", "static-ttf"],
+                Path("/fake/path"),
+                False,
+                True,
+                True,
+            )
+            # Assert old fonts are deleted
+            mock_exists.assert_called_once_with()
+            mock_unlink.assert_called_once_with()
+            # Assert installed_data is updated (repo removed before reinstall)
+            mock_save.assert_called_once()
+            saved_data = mock_save.call_args[0][0]
+            assert "owner/repo" not in saved_data
+
+    @patch("httpx.get")
+    def test_update_version_equal(self, mock_get: MagicMock, runner: CliRunner) -> None:
+        installed_data = {
+            "owner/repo": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash",
+                    "type": "ttf",
+                    "version": "v2.0",
+                }
+            }
+        }
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"tag_name": "v2.0"}
+        mock_get.return_value = mock_response
+        with (
+            patch("main.load_installed_data", return_value=installed_data),
+            patch("packaging.version.Version") as mock_version,
+        ):
+            mock_version.return_value = MagicMock(__gt__=lambda *_: False)  # type: ignore
+            result = runner.invoke(app, ["update", "owner/repo"])
+            assert result.exit_code == 0
+            assert "owner/repo is up to date (v2.0)." in result.output
+
+    @patch("httpx.get")
+    def test_update_api_error(self, mock_get: MagicMock, runner: CliRunner) -> None:
+        installed_data = {
+            "owner/repo": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash",
+                    "type": "ttf",
+                    "version": "1.0",
+                }
+            }
+        }
+        mock_get.side_effect = Exception("API Error")
+        with patch("main.load_installed_data", return_value=installed_data):
+            result = runner.invoke(app, ["update", "owner/repo"])
+            assert result.exit_code == 0
+            assert "Could not fetch latest for owner/repo: API Error" in result.output
+
+    @patch("httpx.get")
+    @patch("main.install_single_repo")
+    def test_update_specific_repo(
+        self,
+        mock_install: MagicMock,
+        mock_get: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        installed_data = {
+            "owner/repo1": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash",
+                    "type": "ttf",
+                    "version": "1.0",
+                }
+            },
+            "owner/repo2": {
+                "font2.ttf": {
+                    "filename": "font2.ttf",
+                    "hash": "hash2",
+                    "type": "ttf",
+                    "version": "1.0",
+                }
+            },
+        }
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"tag_name": "v2.0"}
+        mock_get.return_value = mock_response
+        with (
+            patch("main.load_installed_data", return_value=installed_data),
             patch("main.default_path", Path("/fake/path")),
             patch("packaging.version.Version") as mock_version,
         ):
-            mock_home.return_value = mock_installed_file.parent.parent
-            mock_version.return_value = MagicMock(__gt__=lambda self, other: True)  # type: ignore
+            mock_version.return_value = MagicMock(__gt__=lambda *_: True)  # type: ignore
+            result = runner.invoke(app, ["update", "owner/repo1"])
+            assert result.exit_code == 0
+            assert "Updating owner/repo1 from 1.0 to v2.0..." in result.output
+            # Only repo1 should be checked when specified
+            mock_install.assert_called_once_with(
+                "owner",
+                "repo1",
+                "latest",
+                ["variable-ttf", "otf", "static-ttf"],
+                Path("/fake/path"),
+                False,
+                True,
+                True,
+            )
+
+    @patch("httpx.get")
+    def test_update_version_comparison_error(
+        self, mock_get: MagicMock, runner: CliRunner
+    ) -> None:
+        installed_data = {
+            "owner/repo": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash",
+                    "type": "ttf",
+                    "version": "invalid-version",
+                }
+            }
+        }
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"tag_name": "v2.0"}
+        mock_get.return_value = mock_response
+        with patch("main.load_installed_data", return_value=installed_data):
             result = runner.invoke(app, ["update", "owner/repo"])
             assert result.exit_code == 0
-            mock_install.assert_called_once()
+            assert "Could not compare versions for owner/repo" in result.output
+
+    @patch("httpx.get")
+    @patch("main.install_single_repo")
+    def test_update_partial_success(
+        self,
+        mock_install: MagicMock,
+        mock_get: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        installed_data = {
+            "owner/repo1": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash",
+                    "type": "ttf",
+                    "version": "1.0",
+                }
+            },
+            "owner/repo2": {
+                "font2.ttf": {
+                    "filename": "font2.ttf",
+                    "hash": "hash2",
+                    "type": "ttf",
+                    "version": "1.0",
+                }
+            },
+        }
+
+        def mock_get_side_effect(url: str) -> MagicMock:
+            if "repo1" in url:
+                mock_response = MagicMock()
+                mock_response.json.return_value = {"tag_name": "v2.0"}
+                return mock_response
+            elif "repo2" in url:
+                raise Exception("API Error for repo2")
+            raise Exception("Unexpected URL")
+
+        mock_get.side_effect = mock_get_side_effect
+        with (
+            patch("main.load_installed_data", return_value=installed_data),
+            patch("main.default_path", Path("/fake/path")),
+            patch("packaging.version.Version") as mock_version,
+        ):
+            mock_version.return_value = MagicMock(__gt__=lambda *_: True)  # type: ignore
+            result = runner.invoke(app, ["update"])
+            assert result.exit_code == 0
+            assert "Updating owner/repo1 from 1.0 to v2.0..." in result.output
+            assert (
+                "Could not fetch latest for owner/repo2: API Error for repo2"
+                in result.output
+            )
+            # Should only call install for repo1
+            assert mock_install.call_count == 1
+            mock_install.assert_called_with(
+                "owner",
+                "repo1",
+                "latest",
+                ["variable-ttf", "otf", "static-ttf"],
+                Path("/fake/path"),
+                False,
+                True,
+                True,
+            )
 
 
 class TestInstall:
@@ -267,3 +610,340 @@ class TestInstall:
         result = runner.invoke(app, ["install", "owner/repo", "--format", "invalid"])
         assert result.exit_code == 1
         assert "Invalid --format value" in result.output
+
+    @patch("main.install_single_repo")
+    def test_install_with_force(
+        self, mock_install: MagicMock, runner: CliRunner
+    ) -> None:
+        result = runner.invoke(app, ["install", "owner/repo", "--force"])
+        assert result.exit_code == 0
+        mock_install.assert_called_once_with(
+            "owner",
+            "repo",
+            "latest",
+            ["variable-ttf", "otf", "static-ttf"],
+            Path("/Users/sacha/Library/Fonts"),
+            False,
+            True,  # force=True
+            False,
+        )
+
+    @patch("main.install_single_repo")
+    def test_install_with_local(
+        self, mock_install: MagicMock, runner: CliRunner
+    ) -> None:
+        result = runner.invoke(app, ["install", "owner/repo", "--local"])
+        assert result.exit_code == 0
+        mock_install.assert_called_once_with(
+            "owner",
+            "repo",
+            "latest",
+            ["variable-ttf", "otf", "static-ttf"],
+            Path.cwd(),  # local=True so uses cwd
+            True,  # local=True
+            False,
+            False,
+        )
+
+    @patch("main.install_single_repo")
+    def test_install_with_keep_multiple(
+        self, mock_install: MagicMock, runner: CliRunner
+    ) -> None:
+        result = runner.invoke(app, ["install", "owner/repo", "--keep-multiple"])
+        assert result.exit_code == 0
+        mock_install.assert_called_once_with(
+            "owner",
+            "repo",
+            "latest",
+            ["variable-ttf", "otf", "static-ttf"],
+            Path("/Users/sacha/Library/Fonts"),
+            False,
+            False,
+            True,  # keep_multiple=True
+        )
+
+    @patch("main.install_single_repo")
+    def test_install_with_release(
+        self, mock_install: MagicMock, runner: CliRunner
+    ) -> None:
+        result = runner.invoke(app, ["install", "owner/repo", "--release", "v1.0"])
+        assert result.exit_code == 0
+        mock_install.assert_called_once_with(
+            "owner",
+            "repo",
+            "v1.0",  # release specified
+            ["variable-ttf", "otf", "static-ttf"],
+            Path("/Users/sacha/Library/Fonts"),
+            False,
+            False,
+            False,
+        )
+
+    @patch("main.install_single_repo")
+    def test_install_with_custom_format(
+        self, mock_install: MagicMock, runner: CliRunner
+    ) -> None:
+        result = runner.invoke(
+            app, ["install", "owner/repo", "--format", "otf,static-ttf"]
+        )
+        assert result.exit_code == 0
+        mock_install.assert_called_once_with(
+            "owner",
+            "repo",
+            "latest",
+            ["otf", "static-ttf"],  # custom format
+            Path("/Users/sacha/Library/Fonts"),
+            False,
+            False,
+            False,
+        )
+
+
+class TestFontFunctions:
+    @patch("main.TTFont")
+    def test_is_variable_font_true(self, mock_ttfont: MagicMock) -> None:
+        mock_font = MagicMock()
+        mock_font.__contains__ = lambda *args: args[1] == "fvar"  # type: ignore
+        mock_ttfont.return_value = mock_font
+        from main import is_variable_font
+
+        assert is_variable_font("dummy.ttf") is True
+
+    @patch("main.TTFont")
+    def test_is_variable_font_false(self, mock_ttfont: MagicMock) -> None:
+        mock_font = MagicMock()
+        mock_font.__contains__ = lambda *args: args[1] != "fvar"  # type: ignore
+        mock_ttfont.return_value = mock_font
+        from main import is_variable_font
+
+        assert is_variable_font("dummy.ttf") is False
+
+    @patch("main.TTFont")
+    def test_is_variable_font_error(self, mock_ttfont: MagicMock) -> None:
+        mock_ttfont.side_effect = Exception("Font error")
+        from main import is_variable_font
+
+        with pytest.raises(Exception, match="Font error"):
+            is_variable_font("dummy.ttf")
+
+    def test_parse_repo_valid(self) -> None:
+        from main import parse_repo
+
+        owner, repo = parse_repo("owner/repo")
+        assert owner == "owner"
+        assert repo == "repo"
+
+    def test_parse_repo_invalid(self) -> None:
+        from main import parse_repo
+
+        with pytest.raises(ValueError, match="Invalid repo format"):
+            parse_repo("invalidrepo")
+
+    @patch("main.is_variable_font")
+    def test_categorize_fonts(self, mock_is_var: MagicMock) -> None:
+        from pathlib import Path
+
+        from main import categorize_fonts
+
+        # Mock variable and static fonts
+        mock_is_var.side_effect = [True, False, False, True]
+
+        font_files = [
+            Path("var1.ttf"),
+            Path("static1.ttf"),
+            Path("var2.otf"),
+            Path("static2.woff"),
+            Path("var3.woff2"),
+        ]
+
+        result = categorize_fonts(font_files)
+        (
+            var_ttfs,
+            static_ttfs,
+            otfs,
+            var_woffs,
+            static_woffs,
+            var_woff2s,
+            static_woff2s,
+        ) = result
+
+        assert len(var_ttfs) == 1
+        assert len(static_ttfs) == 1
+        assert len(otfs) == 1
+        assert len(var_woffs) == 0
+        assert len(static_woffs) == 1
+        assert len(var_woff2s) == 1
+        assert len(static_woff2s) == 0
+
+    def test_select_archive_asset_single(self) -> None:
+        from main import select_archive_asset
+
+        assets = cast(
+            "List[Asset]",
+            [
+                {"name": "font.zip", "size": 1000, "browser_download_url": "url1"},
+                {"name": "font.tar.gz", "size": 2000, "browser_download_url": "url2"},
+            ],
+        )
+
+        result = select_archive_asset(assets)
+        assert result["name"] == "font.tar.gz"  # tar.gz has higher priority
+
+    def test_select_archive_asset_multiple_groups(self) -> None:
+        from main import select_archive_asset
+
+        assets = cast(
+            "List[Asset]",
+            [
+                {"name": "font-v1.zip", "size": 1000, "browser_download_url": "url1"},
+                {"name": "font-v1.tar.gz", "size": 800, "browser_download_url": "url2"},
+                {"name": "font-v2.zip", "size": 1200, "browser_download_url": "url3"},
+            ],
+        )
+
+        result = select_archive_asset(assets)
+        assert (
+            result["name"] == "font-v1.tar.gz"
+        )  # smallest in group with highest priority
+
+    def test_select_archive_asset_no_archive(self) -> None:
+        from main import select_archive_asset
+
+        assets = cast(
+            "List[Asset]",
+            [
+                {"name": "font.ttf", "size": 1000, "browser_download_url": "url1"},
+            ],
+        )
+
+        with pytest.raises(ValueError, match="No archive asset found"):
+            select_archive_asset(assets)
+
+    def test_select_fonts_priority_order(self) -> None:
+        from main import select_fonts
+
+        categorized = cast(
+            "Tuple[List[Path], List[Path], List[Path], List[Path], List[Path], List[Path], List[Path]]",
+            (
+                [Path("var.ttf")],  # variable_ttfs
+                [Path("static.ttf")],  # static_ttfs
+                [Path("font.otf")],  # otf_files
+                [],
+                [],
+                [],
+                [],  # empty others
+            ),
+        )
+
+        selected, pri = select_fonts(categorized, ["variable-ttf", "otf", "static-ttf"])
+        assert selected == [Path("var.ttf")]
+        assert pri == "variable-ttf"
+
+    def test_select_fonts_fallback(self) -> None:
+        from main import select_fonts
+
+        categorized = cast(
+            "Tuple[List[Path], List[Path], List[Path], List[Path], List[Path], List[Path], List[Path]]",
+            (
+                [],  # variable_ttfs
+                [Path("static.ttf")],  # static_ttfs
+                [],  # otf_files
+                [],
+                [],
+                [],
+                [],  # empty others
+            ),
+        )
+
+        selected, pri = select_fonts(categorized, ["variable-ttf", "otf", "static-ttf"])
+        assert selected == [Path("static.ttf")]
+        assert pri == "static-ttf"
+
+    def test_select_fonts_no_match(self) -> None:
+        from main import select_fonts
+
+        categorized = cast(
+            "Tuple[List[Path], List[Path], List[Path], List[Path], List[Path], List[Path], List[Path]]",
+            ([], [], [], [], [], [], []),  # all empty
+        )
+
+        selected, pri = select_fonts(categorized, ["variable-ttf"])
+        assert selected == []
+        assert pri == ""
+
+    @patch("httpx.get")
+    def test_fetch_release_info_latest(self, mock_get: MagicMock) -> None:
+        from main import fetch_release_info
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"tag_name": "v1.0"}
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        version, assets = fetch_release_info("owner", "repo", "latest")
+        assert version == "v1.0"
+        assert assets == []
+        mock_get.assert_called_once_with(
+            "https://api.github.com/repos/owner/repo/releases/latest"
+        )
+
+    @patch("httpx.get")
+    def test_fetch_release_info_specific_version(self, mock_get: MagicMock) -> None:
+        from main import fetch_release_info
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"tag_name": "v2.0"}
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        version, assets = fetch_release_info("owner", "repo", "2.0")
+        assert version == "v2.0"
+        assert assets == []
+        mock_get.assert_called_once_with(
+            "https://api.github.com/repos/owner/repo/releases/tags/v2.0"
+        )
+
+    @patch("builtins.open")
+    @patch("tempfile.NamedTemporaryFile")
+    @patch("tempfile.TemporaryDirectory")
+    @patch("httpx.stream")
+    @patch("zipfile.ZipFile")
+    def test_download_and_extract_zip(
+        self,
+        mock_zip: MagicMock,
+        mock_stream: MagicMock,
+        mock_temp_dir: MagicMock,
+        mock_named_temp: MagicMock,
+        mock_open: MagicMock,
+    ) -> None:
+        from main import download_and_extract_archive
+
+        # Mock temporary directory
+        mock_temp_dir.return_value.__enter__.return_value = "/tmp/test"
+
+        # Mock named temporary file
+        mock_file = MagicMock()
+        mock_file.name = "/tmp/test/temp.archive"
+        mock_named_temp.return_value.__enter__.return_value = mock_file
+
+        # Mock HTTP stream
+        mock_response = MagicMock()
+        mock_response.iter_bytes.return_value = [b"fake zip data"]
+        mock_response.raise_for_status.return_value = None
+        mock_context = MagicMock()
+        mock_context.__enter__.return_value = mock_response
+        mock_stream.return_value = mock_context
+
+        # Mock open
+        mock_open.return_value.__enter__.return_value = MagicMock()
+
+        # Mock zip file
+        mock_zip.return_value.__enter__.return_value.extractall.return_value = None
+
+        result = download_and_extract_archive("http://example.com/file.zip", ".zip")
+        assert str(result) == "/tmp/test"
+
+        mock_zip.assert_called_once()
+        mock_zip.return_value.__enter__.return_value.extractall.assert_called_once_with(
+            Path("/tmp/test")
+        )
