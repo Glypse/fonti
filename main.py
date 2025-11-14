@@ -40,7 +40,7 @@ def get_base_and_ext(name: str) -> tuple[str, str]:
 
 # Load default format from config file
 default_priorities = ["variable-ttf", "otf", "static-ttf"]
-default_path = Path.home() / "Desktop"
+default_path = Path.home() / "Library" / "Fonts"
 config_file = Path.home() / ".fontpm" / "config"
 
 if config_file.exists():
@@ -182,7 +182,7 @@ def install_single_repo(
                     temp_data = json.load(f)
                 installed_types = [
                     entry.get("type")
-                    for entry in temp_data.get(repo_arg, [])
+                    for entry in temp_data.get(repo_arg, {}).values()
                     if "type" in entry
                 ]
                 if installed_types and not keep_multiple and not force:
@@ -256,6 +256,8 @@ def install_single_repo(
                 selected_pri = pri
                 break
 
+        installed_data: Dict[str, Dict[str, FontEntry]] = {}
+
         if selected_fonts and not local:
             installed_file = Path.home() / ".fontpm" / "installed.json"
             if installed_file.exists():
@@ -264,7 +266,7 @@ def install_single_repo(
                         temp_data = json.load(f)
                     installed_types = [
                         entry.get("type")
-                        for entry in temp_data.get(repo_arg, [])
+                        for entry in temp_data.get(repo_arg, {}).values()
                         if "type" in entry
                     ]
                     should_skip = False
@@ -284,7 +286,7 @@ def install_single_repo(
         if selected_fonts and not local:
             installed_file = Path.home() / ".fontpm" / "installed.json"
             installed_file.parent.mkdir(exist_ok=True)
-            installed_data: Dict[str, List[FontEntry]] = {}
+            installed_data: Dict[str, Dict[str, FontEntry]] = {}
             if installed_file.exists():
                 try:
                     with open(installed_file) as f:
@@ -294,7 +296,7 @@ def install_single_repo(
 
             repo_key = repo_arg
             if repo_key not in installed_data or force:
-                installed_data[repo_key] = []
+                installed_data[repo_key] = {}
             for font_file in selected_fonts:
                 try:
                     file_hash = hashlib.sha256(font_file.read_bytes()).hexdigest()
@@ -305,8 +307,7 @@ def install_single_repo(
                         "type": selected_pri,
                         "version": version,
                     }
-                    if entry not in installed_data[repo_key]:
-                        installed_data[repo_key].append(entry)
+                    installed_data[repo_key][font_file.name] = entry
                 except Exception as e:
                     console.print(
                         f"[yellow]Warning: Could not hash {font_file.name}: {e}[/yellow]"
@@ -324,9 +325,12 @@ def install_single_repo(
             with console.status("[bold green]Moving fonts..."):
                 for font_file in selected_fonts:
                     shutil.move(str(font_file), str(dest_dir / font_file.name))
-            number_selected_fonts = len(selected_fonts)
+            if not local and repo_arg in installed_data:
+                number_installed_fonts = len(installed_data[repo_arg])
+            else:
+                number_installed_fonts = len(selected_fonts)
             console.print(
-                f"[green]Moved {number_selected_fonts} font{'' if number_selected_fonts == 1 else 's'} from "
+                f"[green]Moved {number_installed_fonts} font{'' if number_installed_fonts == 1 else 's'} from "
                 f"{repo_arg} to: {dest_dir}[/green]"
             )
         else:
@@ -454,7 +458,7 @@ def uninstall(
 
     try:
         with open(installed_file) as f:
-            installed_data: Dict[str, List[FontEntry]] = json.load(f)
+            installed_data: Dict[str, Dict[str, FontEntry]] = json.load(f)
     except Exception as e:
         console.print(f"[red]Error loading installed data: {e}[/red]")
         raise typer.Exit(1) from e
@@ -468,39 +472,40 @@ def uninstall(
             continue
 
         fonts = installed_data[repo_arg]
-        remaining_fonts: List[FontEntry] = []
-        for font_info in fonts:
-            filename = font_info["filename"]
-            expected_hash = font_info["hash"]
+        remaining: Dict[str, FontEntry] = {}
+        for filename, entry in fonts.items():
             font_path = dest_dir / filename
 
             if not font_path.exists():
                 console.print(
                     f"[yellow]Font {filename} not found in {dest_dir}.[/yellow]"
                 )
+                remaining[filename] = entry
                 continue
 
             try:
                 current_hash = hashlib.sha256(font_path.read_bytes()).hexdigest()
             except Exception as e:
                 console.print(f"[yellow]Could not hash {filename}: {e}[/yellow]")
+                remaining[filename] = entry
                 continue
 
-            if current_hash == expected_hash or force:
+            if current_hash == entry["hash"] or force:
                 try:
                     font_path.unlink()
                     console.print(f"[green]Deleted {filename} from {repo_arg}.[/green]")
                     deleted_count += 1
                 except Exception as e:
                     console.print(f"[red]Could not delete {filename}: {e}[/red]")
+                    remaining[filename] = entry
             else:
                 console.print(
                     f"[yellow]Font {filename} has been modified. Use --force to delete.[/yellow]"
                 )
-                remaining_fonts.append(font_info)
+                remaining[filename] = entry
 
-        if remaining_fonts:
-            installed_data[repo_arg] = remaining_fonts
+        if remaining:
+            installed_data[repo_arg] = remaining
         else:
             del installed_data[repo_arg]
 
@@ -510,7 +515,9 @@ def uninstall(
     except Exception as e:
         console.print(f"[yellow]Warning: Could not update installed data: {e}[/yellow]")
 
-    console.print(f"[green]Uninstalled {deleted_count} font(s).[/green]")
+    console.print(
+        f"[green]Uninstalled {deleted_count} font{'' if deleted_count == 1 else 's'}.[/green]"
+    )
 
 
 @app.command()
@@ -547,7 +554,7 @@ def update(
 
     try:
         with open(installed_file) as f:
-            installed_data: Dict[str, List[FontEntry]] = json.load(f)
+            installed_data: Dict[str, Dict[str, FontEntry]] = json.load(f)
     except Exception as e:
         console.print(f"[red]Error loading installed data: {e}[/red]")
         raise typer.Exit(1) from e
@@ -573,7 +580,7 @@ def update(
             continue
 
         # Assume all have same version
-        installed_version = fonts[0]["version"]
+        installed_version = list(fonts.values())[0]["version"]
 
         try:
             owner, repo_name = repo_arg.split("/")
@@ -608,7 +615,7 @@ def update(
                         latest_version,
                         owner,
                         repo_name,
-                        fonts,
+                        list(fonts.values()),
                     )
                 )
         except Exception as e:
@@ -666,7 +673,7 @@ def update(
         ]:
             fonts = installed_data[repo_arg]
             if fonts:
-                installed_version = fonts[0]["version"]
+                installed_version = list(fonts.values())[0]["version"]
                 console.print(
                     f"[dim]{repo_arg} is up to date ({installed_version}).[/dim]"
                 )
