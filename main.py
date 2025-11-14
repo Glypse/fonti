@@ -89,7 +89,7 @@ def install_single_repo(
     # Warn for WOFF/WOFF2 global install
     if (
         any(
-            p in ["woff", "woff2", "variable-woff", "variable-woff2"]
+            p in ["static-woff", "static-woff2", "variable-woff", "variable-woff2"]
             for p in priorities
         )
         and not local
@@ -286,16 +286,16 @@ def install_single_repo(
                 selected_fonts = variable_woff2s
                 selected_pri = pri
                 break
-            elif pri == "woff2" and woff2_files:
-                selected_fonts = woff2_files
+            elif pri == "static-woff2" and static_woff2s:
+                selected_fonts = static_woff2s
                 selected_pri = pri
                 break
             elif pri == "variable-woff" and variable_woffs:
                 selected_fonts = variable_woffs
                 selected_pri = pri
                 break
-            elif pri == "woff" and woff_files:
-                selected_fonts = woff_files
+            elif pri == "static-woff" and static_woffs:
+                selected_fonts = static_woffs
                 selected_pri = pri
                 break
             elif pri == "variable-ttf" and variable_ttfs:
@@ -429,10 +429,10 @@ def install(
         "variable-ttf",
         "otf",
         "static-ttf",
-        "woff",
-        "woff2",
-        "variable-woff",
         "variable-woff2",
+        "variable-woff",
+        "static-woff2",
+        "static-woff",
     ]
     if not priorities or not all(p in valid_formats for p in priorities):
         console.print(
@@ -484,10 +484,10 @@ def config(
             "variable-ttf",
             "otf",
             "static-ttf",
-            "woff",
-            "woff2",
-            "variable-woff",
             "variable-woff2",
+            "variable-woff",
+            "static-woff2",
+            "static-woff",
         ]
         if not all(p in valid for p in priorities):
             console.print(f"[red]Invalid format values: {value}[/red]")
