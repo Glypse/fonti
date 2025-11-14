@@ -197,6 +197,7 @@ class TestImport:
                 False,
                 False,
                 [],
+                ["roman", "italic"],
             )
 
 
@@ -398,6 +399,7 @@ class TestUpdate:
                 True,
                 True,
                 [],
+                ["roman", "italic"],
             )
             # Assert old fonts are deleted
             mock_exists.assert_called_once_with()
@@ -498,6 +500,7 @@ class TestUpdate:
                 True,
                 True,
                 [],
+                ["roman", "italic"],
             )
 
     @patch("httpx.get")
@@ -584,6 +587,7 @@ class TestUpdate:
                 True,
                 True,
                 [],
+                ["roman", "italic"],
             )
 
 
@@ -604,6 +608,7 @@ class TestInstall:
             False,
             False,
             [],
+            ["roman", "italic"],
         )
 
     def test_install_invalid_repo_format(self, runner: CliRunner) -> None:
@@ -632,6 +637,7 @@ class TestInstall:
             True,  # force=True
             False,
             [],
+            ["roman", "italic"],
         )
 
     @patch("main.install_single_repo")
@@ -650,6 +656,7 @@ class TestInstall:
             False,
             False,
             [],
+            ["roman", "italic"],
         )
 
     @patch("main.install_single_repo")
@@ -668,6 +675,7 @@ class TestInstall:
             False,
             True,  # keep_multiple=True
             [],
+            ["roman", "italic"],
         )
 
     @patch("main.install_single_repo")
@@ -686,6 +694,7 @@ class TestInstall:
             False,
             False,
             [],
+            ["roman", "italic"],
         )
 
     @patch("main.install_single_repo")
@@ -706,6 +715,7 @@ class TestInstall:
             False,
             False,
             [],
+            ["roman", "italic"],
         )
 
     @patch("main.install_single_repo")
@@ -724,6 +734,7 @@ class TestInstall:
             False,
             False,
             [400, 700],
+            ["roman", "italic"],
         )
 
     @patch("main.install_single_repo")
@@ -744,12 +755,37 @@ class TestInstall:
             False,
             False,
             [400, 700],
+            ["roman", "italic"],
         )
 
     def test_install_invalid_weights(self, runner: CliRunner) -> None:
         result = runner.invoke(app, ["install", "owner/repo", "--weights", "invalid"])
         assert result.exit_code == 1
         assert "Unknown weight: invalid" in result.output
+
+    @patch("main.install_single_repo")
+    def test_install_with_style(
+        self, mock_install: MagicMock, runner: CliRunner
+    ) -> None:
+        result = runner.invoke(app, ["install", "owner/repo", "--style", "roman"])
+        assert result.exit_code == 0
+        mock_install.assert_called_once_with(
+            "owner",
+            "repo",
+            "latest",
+            ["variable-ttf", "otf", "static-ttf"],
+            Path("/Users/sacha/Library/Fonts"),
+            False,
+            False,
+            False,
+            [],
+            ["roman"],
+        )
+
+    def test_install_invalid_style(self, runner: CliRunner) -> None:
+        result = runner.invoke(app, ["install", "owner/repo", "--style", "invalid"])
+        assert result.exit_code == 1
+        assert "Invalid --style value" in result.output
 
 
 class TestFontFunctions:
@@ -909,7 +945,7 @@ class TestFontFunctions:
         )
 
         selected, pri = select_fonts(
-            categorized, ["variable-ttf", "otf", "static-ttf"], []
+            categorized, ["variable-ttf", "otf", "static-ttf"], [], ["roman", "italic"]
         )
         assert selected == [Path("var.ttf")]
         assert pri == "variable-ttf"
@@ -931,7 +967,7 @@ class TestFontFunctions:
         )
 
         selected, pri = select_fonts(
-            categorized, ["variable-ttf", "otf", "static-ttf"], []
+            categorized, ["variable-ttf", "otf", "static-ttf"], [], ["roman", "italic"]
         )
         assert selected == [Path("static.ttf")]
         assert pri == "static-ttf"
@@ -944,7 +980,9 @@ class TestFontFunctions:
             ([], [], [], [], [], [], []),  # all empty
         )
 
-        selected, pri = select_fonts(categorized, ["variable-ttf"], [])
+        selected, pri = select_fonts(
+            categorized, ["variable-ttf"], [], ["roman", "italic"]
+        )
         assert selected == []
         assert pri == ""
 

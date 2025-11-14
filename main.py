@@ -286,7 +286,10 @@ def download_and_extract_archive(archive_url: str, archive_ext: str) -> Path:
 
 
 def select_fonts(
-    categorized_fonts: Tuple[List[Path], ...], priorities: List[str], weights: List[int]
+    categorized_fonts: Tuple[List[Path], ...],
+    priorities: List[str],
+    weights: List[int],
+    styles: List[str],
 ) -> Tuple[List[Path], str]:
     """Select fonts based on priorities and weights."""
     (
@@ -303,9 +306,9 @@ def select_fonts(
     selected_pri = ""
     for pri in priorities:
         if pri == "variable-woff2" and variable_woff2s:
-            if weights:
+            if weights or styles != ["roman", "italic"]:
                 console.print(
-                    "[yellow]Warning: Weights are ignored for variable fonts.[/yellow]"
+                    "[yellow]Warning: Weights and styles are ignored for variable fonts.[/yellow]"
                 )
             selected_fonts = variable_woff2s
             selected_pri = pri
@@ -316,14 +319,21 @@ def select_fonts(
                 candidates = [
                     f for f in candidates if get_font_weight(str(f)) in weights
                 ]
+            if styles != ["roman", "italic"]:
+                candidates = [
+                    f
+                    for f in candidates
+                    if (get_font_italic(str(f)) and "italic" in styles)
+                    or (not get_font_italic(str(f)) and "roman" in styles)
+                ]
             if candidates:
                 selected_fonts = candidates
                 selected_pri = pri
                 break
         elif pri == "variable-woff" and variable_woffs:
-            if weights:
+            if weights or styles != ["roman", "italic"]:
                 console.print(
-                    "[yellow]Warning: Weights are ignored for variable fonts.[/yellow]"
+                    "[yellow]Warning: Weights and styles are ignored for variable fonts.[/yellow]"
                 )
             selected_fonts = variable_woffs
             selected_pri = pri
@@ -334,24 +344,38 @@ def select_fonts(
                 candidates = [
                     f for f in candidates if get_font_weight(str(f)) in weights
                 ]
+            if styles != ["roman", "italic"]:
+                candidates = [
+                    f
+                    for f in candidates
+                    if (get_font_italic(str(f)) and "italic" in styles)
+                    or (not get_font_italic(str(f)) and "roman" in styles)
+                ]
             if candidates:
                 selected_fonts = candidates
                 selected_pri = pri
                 break
         elif pri == "variable-ttf" and variable_ttfs:
-            if weights:
+            if weights or styles != ["roman", "italic"]:
                 console.print(
-                    "[yellow]Warning: Weights are ignored for variable fonts.[/yellow]"
+                    "[yellow]Warning: Weights and styles are ignored for variable fonts.[/yellow]"
                 )
             selected_fonts = variable_ttfs
             selected_pri = pri
             break
         elif pri == "otf" and otf_files:
-            # OTF are static, filter by weights
+            # OTF are static, filter by weights and styles
             candidates = otf_files
             if weights:
                 candidates = [
                     f for f in candidates if get_font_weight(str(f)) in weights
+                ]
+            if styles != ["roman", "italic"]:
+                candidates = [
+                    f
+                    for f in candidates
+                    if (get_font_italic(str(f)) and "italic" in styles)
+                    or (not get_font_italic(str(f)) and "roman" in styles)
                 ]
             if candidates:
                 selected_fonts = candidates
@@ -362,6 +386,13 @@ def select_fonts(
             if weights:
                 candidates = [
                     f for f in candidates if get_font_weight(str(f)) in weights
+                ]
+            if styles != ["roman", "italic"]:
+                candidates = [
+                    f
+                    for f in candidates
+                    if (get_font_italic(str(f)) and "italic" in styles)
+                    or (not get_font_italic(str(f)) and "roman" in styles)
                 ]
             if candidates:
                 selected_fonts = candidates
@@ -440,6 +471,18 @@ def get_font_weight(font_path: str) -> int:
         return 400  # default to regular
 
 
+def get_font_italic(font_path: str) -> bool:
+    """
+    Check if a font file is italic.
+    """
+    try:
+        font = TTFont(font_path)
+        os2_table = font["OS/2"]  # type: ignore
+        return (os2_table.fsSelection & 0x01) != 0  # type: ignore
+    except Exception:
+        return False
+
+
 def install_single_repo(
     owner: str,
     repo_name: str,
@@ -450,6 +493,7 @@ def install_single_repo(
     force: bool,
     keep_multiple: bool,
     weights: List[int],
+    styles: List[str],
 ) -> None:
     """
     Install fonts from a single GitHub repository.
@@ -526,7 +570,7 @@ def install_single_repo(
 
         categorized_fonts = categorize_fonts(font_files)
         selected_fonts, selected_pri = select_fonts(
-            categorized_fonts, priorities, weights
+            categorized_fonts, priorities, weights, styles
         )
 
         # Check for type conflict
@@ -587,6 +631,11 @@ def install(
         "-w",
         help="Comma-separated list of font weights to install (e.g., 400,700 or Regular,Bold)",
     ),
+    style: str = typer.Option(
+        "both",
+        "--style",
+        help="Font style to install: roman, italic, or both",
+    ),
 ):
     """
     Install fonts from a GitHub release.
@@ -624,6 +673,14 @@ def install(
                     console.print(f"[red]Unknown weight: {w}[/red]")
                     raise typer.Exit(1)
 
+    if style not in ["roman", "italic", "both"]:
+        console.print(
+            "[red]Invalid --style value. Must be roman, italic, or both[/red]"
+        )
+        raise typer.Exit(1)
+
+    parsed_styles = ["roman", "italic"] if style == "both" else [style]
+
     dest_dir = Path.cwd() if local else default_path
     dest_dir.mkdir(exist_ok=True)
 
@@ -643,6 +700,7 @@ def install(
             force,
             keep_multiple,
             parsed_weights,
+            parsed_styles,
         )
 
 
@@ -895,6 +953,7 @@ def update(
             True,
             True,
             [],
+            ["roman", "italic"],
         )
         updated_count += 1
 
@@ -1004,6 +1063,7 @@ def import_fonts(
             force,
             keep_multiple,
             [],
+            ["roman", "italic"],
         )
 
 
