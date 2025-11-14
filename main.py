@@ -18,6 +18,9 @@ from rich.console import Console
 app = typer.Typer()
 console = Console()
 
+cache_app = typer.Typer()
+app.add_typer(cache_app, name="cache")
+
 
 # Constants
 ARCHIVE_EXTENSIONS = [".zip", ".tar.xz", ".tar.gz", ".tgz"]
@@ -34,11 +37,6 @@ DEFAULT_PRIORITIES = ["variable-ttf", "otf", "static-ttf"]
 DEFAULT_PATH = Path.home() / "Library" / "Fonts"
 CONFIG_FILE = Path.home() / ".fontpm" / "config"
 INSTALLED_FILE = Path.home() / ".fontpm" / "installed.json"
-
-# Cache setup
-CACHE_SIZE_LIMIT = 1 * 1024 * 1024 * 1024  # 1GB
-CACHE_DIR = Path(user_cache_dir("fontpm"))
-CACHE = Cache(str(CACHE_DIR), size_limit=CACHE_SIZE_LIMIT)
 
 
 class Asset(TypedDict):
@@ -68,10 +66,11 @@ def get_base_and_ext(name: str) -> tuple[str, str]:
 
 
 # Load default format from config file
-def load_config() -> Tuple[List[str], Path]:
+def load_config() -> Tuple[List[str], Path, int]:
     """Load configuration from config file."""
     priorities = DEFAULT_PRIORITIES.copy()
     path = DEFAULT_PATH
+    cache_size = 200 * 1024 * 1024  # 200MB default
 
     if CONFIG_FILE.exists():
         try:
@@ -92,13 +91,25 @@ def load_config() -> Tuple[List[str], Path]:
                         value = line.split("=", 1)[1].strip()
                         if value:
                             path = Path(value)
+                    elif line.startswith("cache-size="):
+                        value = line.split("=", 1)[1].strip()
+                        try:
+                            cache_size = int(value)
+                        except ValueError:
+                            console.print(
+                                "[yellow]Warning: Invalid cache-size, using default.[/yellow]"
+                            )
         except Exception:
             console.print("[yellow]Warning: Could not load config file.[/yellow]")
 
-    return priorities, path
+    return priorities, path, cache_size
 
 
-default_priorities, default_path = load_config()
+default_priorities, default_path, default_cache_size = load_config()
+
+# Cache setup
+CACHE_DIR = Path(user_cache_dir("fontpm"))
+CACHE = Cache(str(CACHE_DIR), size_limit=default_cache_size)
 
 
 def load_installed_data() -> Dict[str, Dict[str, FontEntry]]:
@@ -308,7 +319,7 @@ def get_or_download_and_extract_archive(
 
         # Check cache size before adding
         archive_size = tmp_path.stat().st_size
-        if CACHE.volume() + archive_size <= CACHE_SIZE_LIMIT:
+        if CACHE.volume() + archive_size <= default_cache_size:
             # Copy to cache
             cache_path = CACHE_DIR / f"{key}"
             shutil.copy(tmp_path, cache_path)
@@ -816,6 +827,14 @@ def config(
     elif key == "path":
         current_config["path"] = value
         console.print(f"[green]Set default path to: {value}[/green]")
+    elif key == "cache-size":
+        try:
+            int_value = int(value)
+            current_config["cache-size"] = str(int_value)
+            console.print(f"[green]Set cache size to: {int_value} bytes[/green]")
+        except ValueError:
+            console.print("[red]Invalid cache size: must be integer[/red]")
+            raise typer.Exit(1) from None
     else:
         console.print(f"[red]Unknown config key: {key}[/red]")
         raise typer.Exit(1)
@@ -1144,6 +1163,15 @@ def import_fonts(
             [],
             ["roman", "italic"],
         )
+
+
+@cache_app.command("purge")
+def purge():
+    """
+    Purge the download cache.
+    """
+    CACHE.clear()
+    console.print("[green]Cache purged.[/green]")
 
 
 if __name__ == "__main__":

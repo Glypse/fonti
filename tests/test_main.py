@@ -50,6 +50,22 @@ class TestConfig:
             assert result.exit_code == 0
             assert "Set default path to: /some/path" in result.output
 
+    def test_config_cache_size_valid(
+        self, runner: CliRunner, mock_config_file: Path
+    ) -> None:
+        with patch("main.CONFIG_FILE", mock_config_file):
+            result = runner.invoke(app, ["config", "cache-size", "100000000"])
+            assert result.exit_code == 0
+            assert "Set cache size to: 100000000 bytes" in result.output
+
+    def test_config_cache_size_invalid(
+        self, runner: CliRunner, mock_config_file: Path
+    ) -> None:
+        with patch("main.CONFIG_FILE", mock_config_file):
+            result = runner.invoke(app, ["config", "cache-size", "invalid"])
+            assert result.exit_code == 1
+            assert "Invalid cache size: must be integer" in result.output
+
     def test_config_invalid_key(self, runner: CliRunner) -> None:
         result = runner.invoke(app, ["config", "invalid", "value"])
         assert result.exit_code == 1
@@ -59,41 +75,46 @@ class TestConfig:
 class TestConfigLoading:
     def test_load_config_no_file(self, temp_dir: Path) -> None:
         with patch("main.CONFIG_FILE", temp_dir / "nonexistent"):
-            priorities, path = load_config()
+            priorities, path, cache_size = load_config()
             assert priorities == DEFAULT_PRIORITIES
             assert path == DEFAULT_PATH
+            assert cache_size == 200 * 1024 * 1024
 
     def test_load_config_valid_format(self, temp_dir: Path) -> None:
         config_file = temp_dir / "config"
         config_file.write_text("format=otf,variable-ttf\npath=/custom/path\n")
         with patch("main.CONFIG_FILE", config_file):
-            priorities, path = load_config()
+            priorities, path, cache_size = load_config()
             assert priorities == ["otf", "variable-ttf"]
             assert path == Path("/custom/path")
+            assert cache_size == 200 * 1024 * 1024
 
     def test_load_config_invalid_format(self, temp_dir: Path) -> None:
         config_file = temp_dir / "config"
         config_file.write_text("format=invalid,format\n")
         with patch("main.CONFIG_FILE", config_file):
-            priorities, path = load_config()
+            priorities, path, cache_size = load_config()
             assert priorities == DEFAULT_PRIORITIES  # Should fallback to default
             assert path == DEFAULT_PATH
+            assert cache_size == 200 * 1024 * 1024
 
     def test_load_config_auto_format(self, temp_dir: Path) -> None:
         config_file = temp_dir / "config"
         config_file.write_text("format=auto\n")
         with patch("main.CONFIG_FILE", config_file):
-            priorities, path = load_config()
+            priorities, path, cache_size = load_config()
             assert priorities == DEFAULT_PRIORITIES  # auto should be ignored
             assert path == DEFAULT_PATH
+            assert cache_size == 200 * 1024 * 1024
 
     def test_load_config_empty_path(self, temp_dir: Path) -> None:
         config_file = temp_dir / "config"
         config_file.write_text("path=\n")
         with patch("main.CONFIG_FILE", config_file):
-            priorities, path = load_config()
+            priorities, path, cache_size = load_config()
             assert priorities == DEFAULT_PRIORITIES
             assert path == DEFAULT_PATH  # empty path should be ignored
+            assert cache_size == 200 * 1024 * 1024
 
     def test_load_config_file_error(self, temp_dir: Path) -> None:
         config_file = temp_dir / "config"
@@ -104,9 +125,19 @@ class TestConfigLoading:
             patch("main.CONFIG_FILE", config_file),
             patch("builtins.open", side_effect=Exception("File error")),
         ):
-            priorities, path = load_config()
+            priorities, path, cache_size = load_config()
             assert priorities == DEFAULT_PRIORITIES
             assert path == DEFAULT_PATH
+            assert cache_size == 200 * 1024 * 1024
+
+    def test_load_config_with_cache_size(self, temp_dir: Path) -> None:
+        config_file = temp_dir / "config"
+        config_file.write_text("cache-size=100000000\n")
+        with patch("main.CONFIG_FILE", config_file):
+            priorities, path, cache_size = load_config()
+            assert priorities == DEFAULT_PRIORITIES
+            assert path == DEFAULT_PATH
+            assert cache_size == 100000000
 
 
 class TestIsVariable:
@@ -1214,3 +1245,12 @@ class TestInstallSingleRepo:
 
         # Should download
         mock_get_or_download.assert_called_once()
+
+
+class TestCache:
+    @patch("main.CACHE")
+    def test_cache_purge(self, mock_cache: MagicMock, runner: CliRunner) -> None:
+        result = runner.invoke(app, ["cache", "purge"])
+        assert result.exit_code == 0
+        assert "Cache purged." in result.output
+        mock_cache.clear.assert_called_once()
