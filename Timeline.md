@@ -7,7 +7,7 @@
 -   [x] Updates fonts installed **via fontpm only** through the `update` syntax
 -   [ ] Changelog preview
 -   [x] Support for non-global installations (example use case: woff2 install insisde of a web app repo)
--   [ ] Enable importing/exporting `installed.json`
+-   [x] Enable importing/exporting `fontpm-fonts.json`
 -   [ ] Specify selected weight(s)
 -   [ ] Caching, --info flag for the font before install
 -   [ ] GitHub auth

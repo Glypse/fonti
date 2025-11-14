@@ -30,6 +30,12 @@ class FontEntry(TypedDict):
     version: str
 
 
+class ExportedFontEntry(TypedDict):
+    filename: str
+    type: str
+    version: str
+
+
 def get_base_and_ext(name: str) -> tuple[str, str]:
     archive_extensions = [".zip", ".tar.xz", ".tar.gz", ".tgz"]
     for ext in archive_extensions:
@@ -451,7 +457,14 @@ def install(
             console.print(f"[red]Invalid repo format: {repo_arg}. Use owner/repo[/red]")
             continue
         install_single_repo(
-            owner, repo_name, release, priorities, dest_dir, local, force, keep_multiple
+            owner,
+            repo_name,
+            release,
+            priorities,
+            Path.cwd() if local else default_path,
+            local,
+            force,
+            keep_multiple,
         )
 
 
@@ -749,6 +762,109 @@ def update(
                 console.print(
                     f"[dim]{repo_arg} is up to date ({installed_version}).[/dim]"
                 )
+
+
+@app.command()
+def export(
+    output: str = typer.Option(
+        "fontpm-fonts.json", "--output", "-o", help="Output file path"
+    ),
+    stdout: bool = typer.Option(
+        False, "--stdout", help="Output to stdout instead of file"
+    ),
+):
+    """
+    Export the installed font library to a shareable file.
+    """
+    installed_file = Path.home() / ".fontpm" / "installed.json"
+    if not installed_file.exists():
+        console.print("[yellow]No installed fonts data found.[/yellow]")
+        return
+
+    try:
+        with open(installed_file) as f:
+            data: Dict[str, Dict[str, FontEntry]] = json.load(f)
+    except Exception as e:
+        console.print(f"[red]Error loading installed data: {e}[/red]")
+        raise typer.Exit(1) from e
+
+    exported: Dict[str, Dict[str, ExportedFontEntry]] = {}
+    for repo, fonts in data.items():
+        exported[repo] = {}
+        for filename, entry in fonts.items():
+            exported[repo][filename] = {
+                "filename": entry["filename"],
+                "type": entry["type"],
+                "version": entry["version"],
+            }
+
+    if stdout:
+        console.print(json.dumps(exported, indent=2))
+    else:
+        try:
+            with open(output, "w") as f:
+                json.dump(exported, f, indent=2)
+            console.print(f"[green]Exported to {output}[/green]")
+        except Exception as e:
+            console.print(f"[red]Error writing to {output}: {e}[/red]")
+            raise typer.Exit(1) from e
+
+
+@app.command("import")
+def import_fonts(
+    file: str = typer.Option(
+        "fontpm-fonts.json",
+        "--input",
+        "-i",
+        help="Path to the exported font library file",
+    ),
+    force: bool = typer.Option(False, "--force", help="Force reinstall"),
+    local: bool = typer.Option(
+        False,
+        "--local",
+        "-l",
+        help="Install fonts to current directory instead of default",
+    ),
+):
+    """
+    Import a font library from an exported file.
+    """
+    try:
+        with open(file) as f:
+            exported: Dict[str, Dict[str, ExportedFontEntry]] = json.load(f)
+    except Exception as e:
+        console.print(f"[red]Error loading {file}: {e}[/red]")
+        raise typer.Exit(1) from e
+
+    for repo, fonts in exported.items():
+        if not fonts:
+            continue
+
+        # Get unique types
+        types = list({entry["type"] for entry in fonts.values()})
+        # Assume all have same version
+        version = list(fonts.values())[0]["version"]
+        # Set priorities to include all types
+        priorities = types  # Order doesn't matter much, as we use keep_multiple
+
+        keep_multiple = len(types) > 1
+
+        try:
+            owner, repo_name = repo.split("/")
+        except ValueError:
+            console.print(f"[red]Invalid repo format: {repo}[/red]")
+            continue
+
+        install_single_repo(
+            owner,
+            repo_name,
+            version,
+            priorities,
+            Path.cwd() if local else default_path,
+            local,
+            force,
+            keep_multiple,
+        )
 
 
 if __name__ == "__main__":
