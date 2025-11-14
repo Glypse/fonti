@@ -254,36 +254,35 @@ def select_archive_asset(assets: List[Asset]) -> Asset:
 
 def download_and_extract_archive(archive_url: str, archive_ext: str) -> Path:
     """Download and extract the archive to a temporary directory."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        extract_dir = Path(temp_dir)
+    temp_dir = tempfile.mkdtemp()
+    extract_dir = Path(temp_dir)
 
-        with tempfile.NamedTemporaryFile(
-            dir=temp_dir, suffix=".archive", delete=False
-        ) as tmp_file:
-            tmp_path = Path(tmp_file.name)
+    tmp_file = tempfile.NamedTemporaryFile(
+        dir=temp_dir, suffix=".archive", delete=False
+    )
+    tmp_path = Path(tmp_file.name)
+    tmp_file.close()
 
-            with console.status("[bold green]Downloading archive..."):
-                with httpx.stream(
-                    "GET", archive_url, follow_redirects=True
-                ) as response:
-                    response.raise_for_status()
-                    with open(tmp_path, "wb") as f:
-                        for chunk in response.iter_bytes():
-                            f.write(chunk)
+    with console.status("[bold green]Downloading archive..."):
+        with httpx.stream("GET", archive_url, follow_redirects=True) as response:
+            response.raise_for_status()
+            with open(tmp_path, "wb") as f:
+                for chunk in response.iter_bytes():
+                    f.write(chunk)
 
-            console.print("Download complete.")
+    console.print("Download complete.")
 
-            with console.status("[bold green]Extracting..."):
-                if archive_ext == ".zip":
-                    with zipfile.ZipFile(tmp_path, "r") as archive_ref:
-                        archive_ref.extractall(extract_dir)
-                else:
-                    # For tar archives
-                    mode = "r:xz" if archive_ext == ".tar.xz" else "r:gz"
-                    with tarfile.open(tmp_path, mode) as archive_ref:
-                        archive_ref.extractall(extract_dir)
+    with console.status("[bold green]Extracting..."):
+        if archive_ext == ".zip":
+            with zipfile.ZipFile(tmp_path, "r") as archive_ref:
+                archive_ref.extractall(extract_dir)
+        else:
+            # For tar archives
+            mode = "r:xz" if archive_ext == ".tar.xz" else "r:gz"
+            with tarfile.open(tmp_path, mode) as archive_ref:
+                archive_ref.extractall(extract_dir)
 
-        return extract_dir
+    return extract_dir
 
 
 def select_fonts(
@@ -455,6 +454,7 @@ def install_single_repo(
             )
             return
 
+    extract_dir = None
     try:
         version, assets = fetch_release_info(owner, repo_name, release)
         chosen_asset = select_archive_asset(assets)
@@ -497,6 +497,9 @@ def install_single_repo(
     except Exception as e:
         console.print(f"[red]Error installing from {repo_arg}: {e}[/red]")
         raise
+    finally:
+        if extract_dir:
+            shutil.rmtree(str(extract_dir))
 
 
 @app.command()

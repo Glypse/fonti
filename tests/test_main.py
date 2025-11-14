@@ -905,26 +905,26 @@ class TestFontFunctions:
 
     @patch("builtins.open")
     @patch("tempfile.NamedTemporaryFile")
-    @patch("tempfile.TemporaryDirectory")
+    @patch("tempfile.mkdtemp")
     @patch("httpx.stream")
     @patch("zipfile.ZipFile")
     def test_download_and_extract_zip(
         self,
         mock_zip: MagicMock,
         mock_stream: MagicMock,
-        mock_temp_dir: MagicMock,
+        mock_mkdtemp: MagicMock,
         mock_named_temp: MagicMock,
         mock_open: MagicMock,
     ) -> None:
         from main import download_and_extract_archive
 
-        # Mock temporary directory
-        mock_temp_dir.return_value.__enter__.return_value = "/tmp/test"
+        # Mock mkdtemp
+        mock_mkdtemp.return_value = "/tmp/test"
 
         # Mock named temporary file
         mock_file = MagicMock()
         mock_file.name = "/tmp/test/temp.archive"
-        mock_named_temp.return_value.__enter__.return_value = mock_file
+        mock_named_temp.return_value = mock_file
 
         # Mock HTTP stream
         mock_response = MagicMock()
