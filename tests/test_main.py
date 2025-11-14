@@ -1280,6 +1280,134 @@ class TestInstallSingleRepo:
         mock_get_or_download.assert_called_once()
 
 
+class TestFix:
+    def test_fix_no_installed_file(self, runner: CliRunner) -> None:
+        with patch("main.load_installed_data", return_value={}):
+            result = runner.invoke(app, ["fix"])
+            assert result.exit_code == 0
+            assert "No installed fonts data found." in result.output
+
+    def test_fix_no_duplicates(self, runner: CliRunner) -> None:
+        installed_data = {
+            "repo1": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash1",
+                    "type": "ttf",
+                    "version": "1.0",
+                }
+            },
+            "repo2": {
+                "font2.ttf": {
+                    "filename": "font2.ttf",
+                    "hash": "hash2",
+                    "type": "ttf",
+                    "version": "1.0",
+                }
+            },
+        }
+        with patch("main.load_installed_data", return_value=installed_data):
+            result = runner.invoke(app, ["fix"])
+            assert result.exit_code == 0
+            assert "No duplicates found." in result.output
+
+    @patch("main.save_installed_data")
+    def test_fix_with_duplicates(self, mock_save: MagicMock, runner: CliRunner) -> None:
+        installed_data = {
+            "repo1": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash1",
+                    "type": "ttf",
+                    "version": "1.0",
+                }
+            },
+            "repo2": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash1",
+                    "type": "ttf",
+                    "version": "1.0",
+                }
+            },
+            "repo3": {
+                "font2.ttf": {
+                    "filename": "font2.ttf",
+                    "hash": "hash2",
+                    "type": "ttf",
+                    "version": "1.0",
+                }
+            },
+        }
+        with patch("main.load_installed_data", return_value=installed_data):
+            result = runner.invoke(app, ["fix"])
+            assert result.exit_code == 0
+            assert "Found 1 duplicate filename(s):" in result.output
+            assert "font1.ttf: repo1, repo2" in result.output
+            assert "Removed duplicate font1.ttf from repo2" in result.output
+            assert "Removed empty repo repo2" in result.output
+            assert "Fixed 1 duplicate entries." in result.output
+            mock_save.assert_called_once()
+            # Check that repo2 is removed
+            saved_data = mock_save.call_args[0][0]
+            assert "repo2" not in saved_data
+
+    @patch("main.save_installed_data")
+    def test_fix_dry_run(self, mock_save: MagicMock, runner: CliRunner) -> None:
+        installed_data = {
+            "repo1": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash1",
+                    "type": "ttf",
+                    "version": "1.0",
+                }
+            },
+            "repo2": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash1",
+                    "type": "ttf",
+                    "version": "1.0",
+                }
+            },
+        }
+        with patch("main.load_installed_data", return_value=installed_data):
+            result = runner.invoke(app, ["fix", "--dry-run"])
+            assert result.exit_code == 0
+            assert "Found 1 duplicate filename(s):" in result.output
+            assert "Dry run: No changes made." in result.output
+            mock_save.assert_not_called()
+
+    @patch("shutil.copy")
+    def test_fix_backup(
+        self, mock_copy: MagicMock, runner: CliRunner, temp_dir: Path
+    ) -> None:
+        installed_file = temp_dir / ".fontpm" / "installed.json"
+        installed_file.parent.mkdir(parents=True, exist_ok=True)
+        installed_file.write_text("{}")
+        installed_data = {
+            "repo1": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash1",
+                    "type": "ttf",
+                    "version": "1.0",
+                }
+            },
+        }
+        with (
+            patch("main.load_installed_data", return_value=installed_data),
+            patch("main.INSTALLED_FILE", installed_file),
+        ):
+            result = runner.invoke(app, ["fix", "--backup"])
+            assert result.exit_code == 0
+            assert "Backup created:" in result.output
+            mock_copy.assert_called_once_with(
+                installed_file, installed_file.with_suffix(".json.backup")
+            )
+
+
 class TestCache:
     @patch("main.CACHE")
     def test_cache_purge(self, mock_cache: MagicMock, runner: CliRunner) -> None:

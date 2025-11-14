@@ -1156,6 +1156,75 @@ def import_fonts(
         )
 
 
+@app.command()
+def fix(
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be fixed without making changes"
+    ),
+    backup: bool = typer.Option(
+        False, "--backup", help="Create a backup of installed.json before fixing"
+    ),
+):
+    """
+    Fix the installed.json file by removing duplicates and other issues.
+    """
+    installed_data = load_installed_data()
+    if not installed_data:
+        console.print("[yellow]No installed fonts data found.[/yellow]")
+        return
+
+    if backup:
+        backup_file = INSTALLED_FILE.with_suffix(".json.backup")
+        try:
+            shutil.copy(INSTALLED_FILE, backup_file)
+            console.print(f"[green]Backup created: {backup_file}[/green]")
+        except Exception as e:
+            console.print(f"[red]Failed to create backup: {e}[/red]")
+            raise typer.Exit(1) from e
+
+    # Detect duplicates: filename -> list of repos
+    filename_to_repos: Dict[str, List[str]] = defaultdict(list)
+    for repo, fonts in installed_data.items():
+        for filename in fonts.keys():
+            filename_to_repos[filename].append(repo)
+
+    duplicates = {
+        filename: repos
+        for filename, repos in filename_to_repos.items()
+        if len(repos) > 1
+    }
+
+    if not duplicates:
+        console.print("[green]No duplicates found.[/green]")
+        return
+
+    console.print(f"[yellow]Found {len(duplicates)} duplicate filename(s):[/yellow]")
+    for filename, repos in duplicates.items():
+        console.print(f"  {filename}: {', '.join(repos)}")
+
+    if dry_run:
+        console.print("[blue]Dry run: No changes made.[/blue]")
+        return
+
+    # Remove duplicates: keep in the first repo, remove from others
+    removed_count = 0
+    for filename, repos in duplicates.items():
+        for repo in repos[1:]:
+            if filename in installed_data[repo]:
+                del installed_data[repo][filename]
+                removed_count += 1
+                console.print(
+                    f"[green]Removed duplicate {filename} from {repo}[/green]"
+                )
+            # If repo now empty, remove it
+            if not installed_data[repo]:
+                del installed_data[repo]
+                console.print(f"[green]Removed empty repo {repo}[/green]")
+
+    save_installed_data(installed_data)
+    console.print(f"[green]Fixed {removed_count} duplicate entries.[/green]")
+
+
 @cache_app.command("purge")
 def purge():
     """
