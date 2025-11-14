@@ -86,6 +86,21 @@ def install_single_repo(
     repo_arg = f"{owner}/{repo_name}"
     console.print(f"[bold]Installing from {repo_arg}...[/bold]")
 
+    # Warn for WOFF/WOFF2 global install
+    if (
+        any(
+            p in ["woff", "woff2", "variable-woff", "variable-woff2"]
+            for p in priorities
+        )
+        and not local
+        and not force
+    ):
+        console.print(
+            "[yellow]Installing WOFF/WOFF2 fonts globally is not recommended. "
+            "Use --force to proceed.[/yellow]"
+        )
+        return
+
     if not local:
         installed_file = Path.home() / ".fontpm" / "installed.json"
         if installed_file.exists():
@@ -226,6 +241,8 @@ def install_single_repo(
         # Find all font files
         ttf_files = list(extract_dir.rglob("*.ttf"))
         otf_files = list(extract_dir.rglob("*.otf"))
+        woff_files = list(extract_dir.rglob("*.woff"))
+        woff2_files = list(extract_dir.rglob("*.woff2"))
 
         variable_ttfs: list[Path] = []
         static_ttfs: list[Path] = []
@@ -239,11 +256,49 @@ def install_single_repo(
                 # If can't check, treat as static
                 static_ttfs.append(ttf)
 
+        variable_woffs: list[Path] = []
+        static_woffs: list[Path] = []
+        for woff in woff_files:
+            try:
+                if is_variable_font(str(woff)):
+                    variable_woffs.append(woff)
+                else:
+                    static_woffs.append(woff)
+            except Exception:
+                static_woffs.append(woff)
+
+        variable_woff2s: list[Path] = []
+        static_woff2s: list[Path] = []
+        for woff2 in woff2_files:
+            try:
+                if is_variable_font(str(woff2)):
+                    variable_woff2s.append(woff2)
+                else:
+                    static_woff2s.append(woff2)
+            except Exception:
+                static_woff2s.append(woff2)
+
         # Select fonts in order of preference
         selected_fonts: list[Path] = []
         selected_pri = None
         for pri in priorities:
-            if pri == "variable-ttf" and variable_ttfs:
+            if pri == "variable-woff2" and variable_woff2s:
+                selected_fonts = variable_woff2s
+                selected_pri = pri
+                break
+            elif pri == "woff2" and woff2_files:
+                selected_fonts = woff2_files
+                selected_pri = pri
+                break
+            elif pri == "variable-woff" and variable_woffs:
+                selected_fonts = variable_woffs
+                selected_pri = pri
+                break
+            elif pri == "woff" and woff_files:
+                selected_fonts = woff_files
+                selected_pri = pri
+                break
+            elif pri == "variable-ttf" and variable_ttfs:
                 selected_fonts = variable_ttfs
                 selected_pri = pri
                 break
@@ -370,7 +425,15 @@ def install(
     Install fonts from a GitHub release.
     """
     priorities = [p.strip() for p in format.split(",")]
-    valid_formats = ["variable-ttf", "otf", "static-ttf"]
+    valid_formats = [
+        "variable-ttf",
+        "otf",
+        "static-ttf",
+        "woff",
+        "woff2",
+        "variable-woff",
+        "variable-woff2",
+    ]
     if not priorities or not all(p in valid_formats for p in priorities):
         console.print(
             "[red]Invalid --format value. Must be comma-separated list of: "
@@ -417,7 +480,16 @@ def config(
 
     if key == "format":
         priorities = [p.strip() for p in value.split(",")]
-        if not all(p in ["variable-ttf", "otf", "static-ttf"] for p in priorities):
+        valid = [
+            "variable-ttf",
+            "otf",
+            "static-ttf",
+            "woff",
+            "woff2",
+            "variable-woff",
+            "variable-woff2",
+        ]
+        if not all(p in valid for p in priorities):
             console.print(f"[red]Invalid format values: {value}[/red]")
             raise typer.Exit(1)
         current_config["format"] = value
