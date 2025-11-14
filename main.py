@@ -15,11 +15,14 @@ from fontTools.ttLib import TTFont  # type: ignore
 from platformdirs import user_cache_dir
 from rich.console import Console
 
-app = typer.Typer()
+app = typer.Typer(rich_markup_mode="rich")
 console = Console()
 
-cache_app = typer.Typer()
+cache_app = typer.Typer(rich_markup_mode="rich")
 app.add_typer(cache_app, name="cache")
+
+config_app = typer.Typer(rich_markup_mode="rich")
+app.add_typer(config_app, name="config")
 
 
 # Constants
@@ -37,6 +40,8 @@ DEFAULT_PRIORITIES = ["variable-ttf", "otf", "static-ttf"]
 DEFAULT_PATH = Path.home() / "Library" / "Fonts"
 CONFIG_FILE = Path.home() / ".fontpm" / "config"
 INSTALLED_FILE = Path.home() / ".fontpm" / "installed.json"
+
+FORMAT_HELP = f"Comma-separated list of font formats to prefer[dim] (options: {', '.join(VALID_FORMATS)})[/dim]"  # noqa: E501
 
 
 class Asset(TypedDict):
@@ -110,6 +115,44 @@ default_priorities, default_path, default_cache_size = load_config()
 # Cache setup
 CACHE_DIR = Path(user_cache_dir("fontpm"))
 CACHE = Cache(str(CACHE_DIR), size_limit=default_cache_size)
+
+
+def set_config(key: str, value: str) -> None:
+    """Set a configuration key-value pair."""
+    current_config: Dict[str, str] = {}
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE) as f:
+                for line in f:
+                    line = line.strip()
+                    if "=" in line:
+                        k, v = line.split("=", 1)
+                        current_config[k] = v
+        except Exception:
+            console.print("[yellow]Warning: Could not load existing config.[/yellow]")
+
+    if key == "format":
+        priorities = [p.strip() for p in value.split(",")]
+        if not all(p in VALID_FORMATS for p in priorities):
+            console.print(f"[red]Invalid format values: {value}[/red]")
+            raise typer.Exit(1)
+    elif key == "cache-size":
+        try:
+            int(value)
+        except ValueError:
+            console.print("[red]Invalid cache size: must be integer[/red]")
+            raise typer.Exit(1) from None
+
+    current_config[key] = value
+    console.print(f"[green]Set {key} to: {value}[/green]")
+
+    try:
+        with open(CONFIG_FILE, "w") as f:
+            for k, v in current_config.items():
+                f.write(f"{k}={v}\n")
+    except Exception as e:
+        console.print(f"[red]Error writing config: {e}[/red]")
+        raise typer.Exit(1) from e
 
 
 def load_installed_data() -> Dict[str, Dict[str, FontEntry]]:
@@ -794,59 +837,30 @@ def install(
         )
 
 
-@app.command()
-def config(
-    key: str = typer.Argument(..., help="Configuration key"),
-    value: str = typer.Argument(
-        ..., help="Configuration value (comma-separated for format)"
-    ),
+@config_app.command("format")
+def config_format(value: str = typer.Argument(..., help=FORMAT_HELP)):
+    """
+    Set the default font format priorities.
+    """
+    set_config("format", value)
+
+
+@config_app.command("path")
+def config_path(
+    value: str = typer.Argument(..., help="Path to the font installation directory")
 ):
     """
-    Set configuration options.
+    Set the default font installation path.
     """
-    # Load existing config
-    current_config: Dict[str, str] = {}
-    if CONFIG_FILE.exists():
-        try:
-            with open(CONFIG_FILE) as f:
-                for line in f:
-                    line = line.strip()
-                    if "=" in line:
-                        k, v = line.split("=", 1)
-                        current_config[k] = v
-        except Exception:
-            console.print("[yellow]Warning: Could not load existing config.[/yellow]")
+    set_config("path", value)
 
-    if key == "format":
-        priorities = [p.strip() for p in value.split(",")]
-        if not all(p in VALID_FORMATS for p in priorities):
-            console.print(f"[red]Invalid format values: {value}[/red]")
-            raise typer.Exit(1)
-        current_config["format"] = value
-        console.print(f"[green]Set default format to: {value}[/green]")
-    elif key == "path":
-        current_config["path"] = value
-        console.print(f"[green]Set default path to: {value}[/green]")
-    elif key == "cache-size":
-        try:
-            int_value = int(value)
-            current_config["cache-size"] = str(int_value)
-            console.print(f"[green]Set cache size to: {int_value} bytes[/green]")
-        except ValueError:
-            console.print("[red]Invalid cache size: must be integer[/red]")
-            raise typer.Exit(1) from None
-    else:
-        console.print(f"[red]Unknown config key: {key}[/red]")
-        raise typer.Exit(1)
 
-    # Write back all config
-    try:
-        with open(CONFIG_FILE, "w") as f:
-            for k, v in current_config.items():
-                f.write(f"{k}={v}\n")
-    except Exception as e:
-        console.print(f"[red]Error writing config: {e}[/red]")
-        raise typer.Exit(1) from e
+@config_app.command("cache-size")
+def config_cache_size(value: str = typer.Argument(..., help="Cache size in bytes")):
+    """
+    Set the download cache size limit.
+    """
+    set_config("cache-size", value)
 
 
 @app.command()

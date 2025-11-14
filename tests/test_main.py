@@ -42,13 +42,13 @@ class TestConfig:
         with patch("main.CONFIG_FILE", mock_config_file):
             result = runner.invoke(app, ["config", "format", "variable-ttf,otf"])
             assert result.exit_code == 0
-            assert "Set default format to: variable-ttf,otf" in result.output
+            assert "Set format to: variable-ttf,otf" in result.output
 
     def test_config_path_valid(self, runner: CliRunner, mock_config_file: Path) -> None:
         with patch("main.CONFIG_FILE", mock_config_file):
             result = runner.invoke(app, ["config", "path", "/some/path"])
             assert result.exit_code == 0
-            assert "Set default path to: /some/path" in result.output
+            assert "Set path to: /some/path" in result.output
 
     def test_config_cache_size_valid(
         self, runner: CliRunner, mock_config_file: Path
@@ -56,7 +56,7 @@ class TestConfig:
         with patch("main.CONFIG_FILE", mock_config_file):
             result = runner.invoke(app, ["config", "cache-size", "100000000"])
             assert result.exit_code == 0
-            assert "Set cache size to: 100000000 bytes" in result.output
+            assert "Set cache-size to: 100000000" in result.output
 
     def test_config_cache_size_invalid(
         self, runner: CliRunner, mock_config_file: Path
@@ -65,11 +65,6 @@ class TestConfig:
             result = runner.invoke(app, ["config", "cache-size", "invalid"])
             assert result.exit_code == 1
             assert "Invalid cache size: must be integer" in result.output
-
-    def test_config_invalid_key(self, runner: CliRunner) -> None:
-        result = runner.invoke(app, ["config", "invalid", "value"])
-        assert result.exit_code == 1
-        assert "Unknown config key: invalid" in result.output
 
 
 class TestConfigLoading:
