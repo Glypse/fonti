@@ -1,3 +1,5 @@
+import hashlib
+import json
 import shutil
 import tarfile
 import tempfile
@@ -18,7 +20,14 @@ console = Console()
 # Load default format from config file
 default_priorities = ["variable-ttf", "otf", "static-ttf"]
 default_path = Path.home() / "Desktop"
-config_file = Path.home() / ".fontpm"
+config_file = Path.home() / ".fontpm" / "config"
+old_config_file = Path.home() / ".fontpm"
+if old_config_file.exists() and old_config_file.is_file():
+    # Migrate old config
+    config_file.parent.mkdir(exist_ok=True)
+    import shutil
+
+    shutil.move(str(old_config_file), str(config_file))
 if config_file.exists():
     try:
         with open(config_file) as f:
@@ -226,6 +235,40 @@ def install(
                     selected_fonts = static_ttfs
                     break
 
+            # Track installed fonts for global installs
+            if selected_fonts and not local:
+                installed_file = Path.home() / ".fontpm" / "installed.json"
+                installed_file.parent.mkdir(exist_ok=True)
+                installed_data: Dict[str, List[Dict[str, str]]] = {}
+                if installed_file.exists():
+                    try:
+                        with open(installed_file) as f:
+                            installed_data = json.load(f)
+                    except Exception:
+                        pass  # Ignore load errors
+
+                repo_key = repo_arg
+                if repo_key not in installed_data:
+                    installed_data[repo_key] = []
+                for font_file in selected_fonts:
+                    try:
+                        file_hash = hashlib.sha256(font_file.read_bytes()).hexdigest()
+                        installed_data[repo_key].append(
+                            {"filename": font_file.name, "hash": file_hash}
+                        )
+                    except Exception as e:
+                        console.print(
+                            f"[yellow]Warning: Could not hash {font_file.name}: {e}[/yellow]"
+                        )
+
+                try:
+                    with open(installed_file, "w") as f:
+                        json.dump(installed_data, f, indent=2)
+                except Exception as e:
+                    console.print(
+                        f"[yellow]Warning: Could not save install data: {e}[/yellow]"
+                    )
+
             if selected_fonts:
                 with console.status("[bold green]Moving fonts..."):
                     for font_file in selected_fonts:
@@ -285,6 +328,84 @@ def config(
     except Exception as e:
         console.print(f"[red]Error writing config: {e}[/red]")
         raise typer.Exit(1) from e
+
+
+@app.command()
+def uninstall(
+    repo: List[str] = typer.Argument(  # noqa: B008
+        ..., help="GitHub repository in format owner/repo"
+    ),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Force deletion even if hashes don't match"
+    ),
+):
+    """
+    Uninstall fonts from a GitHub repository.
+    """
+    installed_file = Path.home() / ".fontpm" / "installed.json"
+    if not installed_file.exists():
+        console.print("[yellow]No installed fonts data found.[/yellow]")
+        return
+
+    try:
+        with open(installed_file) as f:
+            installed_data: Dict[str, List[Dict[str, str]]] = json.load(f)
+    except Exception as e:
+        console.print(f"[red]Error loading installed data: {e}[/red]")
+        raise typer.Exit(1) from e
+
+    dest_dir = default_path
+    deleted_count = 0
+
+    for repo_arg in repo:
+        if repo_arg not in installed_data:
+            console.print(f"[yellow]No fonts installed from {repo_arg}.[/yellow]")
+            continue
+
+        fonts = installed_data[repo_arg]
+        remaining_fonts: List[Dict[str, str]] = []
+        for font_info in fonts:
+            filename = font_info["filename"]
+            expected_hash = font_info["hash"]
+            font_path = dest_dir / filename
+
+            if not font_path.exists():
+                console.print(
+                    f"[yellow]Font {filename} not found in {dest_dir}.[/yellow]"
+                )
+                continue
+
+            try:
+                current_hash = hashlib.sha256(font_path.read_bytes()).hexdigest()
+            except Exception as e:
+                console.print(f"[yellow]Could not hash {filename}: {e}[/yellow]")
+                continue
+
+            if current_hash == expected_hash or force:
+                try:
+                    font_path.unlink()
+                    console.print(f"[green]Deleted {filename} from {repo_arg}.[/green]")
+                    deleted_count += 1
+                except Exception as e:
+                    console.print(f"[red]Could not delete {filename}: {e}[/red]")
+            else:
+                console.print(
+                    f"[yellow]Font {filename} has been modified. Use --force to delete.[/yellow]"
+                )
+                remaining_fonts.append(font_info)
+
+        if remaining_fonts:
+            installed_data[repo_arg] = remaining_fonts
+        else:
+            del installed_data[repo_arg]
+
+    try:
+        with open(installed_file, "w") as f:
+            json.dump(installed_data, f, indent=2)
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not update installed data: {e}[/yellow]")
+
+    console.print(f"[green]Uninstalled {deleted_count} font(s).[/green]")
 
 
 @app.command()
