@@ -42,13 +42,7 @@ def get_base_and_ext(name: str) -> tuple[str, str]:
 default_priorities = ["variable-ttf", "otf", "static-ttf"]
 default_path = Path.home() / "Desktop"
 config_file = Path.home() / ".fontpm" / "config"
-old_config_file = Path.home() / ".fontpm"
-if old_config_file.exists() and old_config_file.is_file():
-    # Migrate old config
-    config_file.parent.mkdir(exist_ok=True)
-    import shutil
 
-    shutil.move(str(old_config_file), str(config_file))
 if config_file.exists():
     try:
         with open(config_file) as f:
@@ -537,7 +531,12 @@ def is_variable(
 
 
 @app.command()
-def update():
+def update(
+    repo: List[str] = typer.Argument(  # noqa: B008
+        default_factory=list,
+        help="GitHub repository in format owner/repo. If not specified, update all.",
+    ),
+):
     """
     Update installed fonts to the latest versions.
     """
@@ -558,7 +557,18 @@ def update():
     updated_count = 0
     repos_to_update: List[Tuple[str, str, str, str, str, List[FontEntry]]] = []
 
-    for repo_arg, fonts in installed_data.items():
+    repos_to_check = list(installed_data.keys()) if not repo else repo
+
+    # Warn for repos not installed
+    for r in repo:
+        if r not in installed_data:
+            console.print(f"[yellow]No fonts installed from {r}.[/yellow]")
+
+    for repo_arg in repos_to_check:
+        if repo_arg not in installed_data:
+            continue
+
+        fonts = installed_data[repo_arg]
         if not fonts:
             continue
 
@@ -650,10 +660,16 @@ def update():
         )
         updated_count += 1
 
-    for repo_arg, fonts in installed_data.items():
-        if fonts:
-            installed_version = fonts[0]["version"]
-            console.print(f"[dim]{repo_arg} is up to date ({installed_version}).[/dim]")
+    for repo_arg in repos_to_check:
+        if repo_arg in installed_data and repo_arg not in [
+            r[0] for r in repos_to_update
+        ]:
+            fonts = installed_data[repo_arg]
+            if fonts:
+                installed_version = fonts[0]["version"]
+                console.print(
+                    f"[dim]{repo_arg} is up to date ({installed_version}).[/dim]"
+                )
 
 
 if __name__ == "__main__":
