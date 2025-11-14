@@ -35,6 +35,12 @@ def mock_installed_file(temp_dir: Path) -> Path:
     return installed_file
 
 
+@pytest.fixture(autouse=True)
+def mock_installed_file_path(temp_dir: Path) -> Iterator[None]:
+    with patch("main.INSTALLED_FILE", temp_dir / ".fontpm" / "installed.json"):
+        yield
+
+
 class TestConfig:
     def test_config_format_valid(
         self, runner: CliRunner, mock_config_file: Path
@@ -477,8 +483,10 @@ class TestUpdate:
 
     @patch("httpx.get")
     @patch("main.install_single_repo")
+    @patch("main.save_installed_data")
     def test_update_specific_repo(
         self,
+        _mock_save: MagicMock,
         mock_install: MagicMock,
         mock_get: MagicMock,
         runner: CliRunner,
@@ -550,8 +558,10 @@ class TestUpdate:
 
     @patch("httpx.get")
     @patch("main.install_single_repo")
+    @patch("main.save_installed_data")
     def test_update_partial_success(
         self,
+        _mock_save: MagicMock,
         mock_install: MagicMock,
         mock_get: MagicMock,
         runner: CliRunner,
