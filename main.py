@@ -243,7 +243,7 @@ def categorize_fonts(
 
 def fetch_release_info(
     owner: str, repo_name: str, release: str
-) -> Tuple[str, List[Asset]]:
+) -> Tuple[str, List[Asset], str]:
     """Fetch release information from GitHub API."""
     with console.status("[bold green]Fetching release info..."):
         if release == "latest":
@@ -270,7 +270,8 @@ def fetch_release_info(
         release_data: Dict[str, Any] = response.json()
         version = release_data["tag_name"]
         assets: List[Asset] = release_data.get("assets", [])
-        return version, assets
+        body = release_data.get("body", "")
+        return version, assets, body
 
 
 def select_archive_asset(assets: List[Asset]) -> Asset:
@@ -642,7 +643,7 @@ def install_single_repo(
     extract_dir = None
     try:
         if release == "latest":
-            version, assets = fetch_release_info(owner, repo_name, release)
+            version, assets, _ = fetch_release_info(owner, repo_name, release)
             chosen_asset = select_archive_asset(assets)
             archive_url = chosen_asset["browser_download_url"]
             archive_name = chosen_asset["name"]
@@ -676,7 +677,7 @@ def install_single_repo(
                         with tarfile.open(cached_archive_path, mode) as archive_ref:
                             archive_ref.extractall(extract_dir)
             else:
-                _, assets = fetch_release_info(owner, repo_name, release)
+                _, assets, _ = fetch_release_info(owner, repo_name, release)
                 chosen_asset = select_archive_asset(assets)
                 archive_url = chosen_asset["browser_download_url"]
                 archive_name = chosen_asset["name"]
@@ -927,6 +928,9 @@ def update(
         default_factory=list,
         help="GitHub repository in format owner/repo. If not specified, update all.",
     ),
+    changelog: bool = typer.Option(
+        False, "--changelog", "-c", help="Display changelog of updated releases"
+    ),
 ):
     """
     Update installed fonts to the latest versions.
@@ -939,7 +943,7 @@ def update(
     from packaging.version import Version
 
     updated_count = 0
-    repos_to_update: List[Tuple[str, str, str, str, str, List[FontEntry]]] = []
+    repos_to_update: List[Tuple[str, str, str, str, str, List[FontEntry], str]] = []
 
     repos_to_check = list(installed_data.keys()) if not repo else repo
 
@@ -971,6 +975,7 @@ def update(
             response.raise_for_status()
             release_data = response.json()
             latest_version = release_data["tag_name"]
+            body = release_data.get("body", "")
         except Exception as e:
             console.print(
                 f"[yellow]Could not fetch latest for {repo_arg}: {e}[/yellow]"
@@ -993,6 +998,7 @@ def update(
                         owner,
                         repo_name,
                         list(fonts.values()),
+                        body,
                     )
                 )
         except Exception as e:
@@ -1007,6 +1013,7 @@ def update(
         owner,
         repo_name,
         fonts,
+        body,
     ) in repos_to_update:
         console.print(
             f"[bold]Updating {repo_arg} from {installed_version} to {latest_version}...[/bold]"
@@ -1037,6 +1044,9 @@ def update(
             [],
             ["roman", "italic"],
         )
+        if changelog and body:
+            console.print(f"[bold]Changelog for {repo_arg} {latest_version}:[/bold]")
+            console.print(body)
         updated_count += 1
 
     for repo_arg in repos_to_check:

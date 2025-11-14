@@ -622,6 +622,64 @@ class TestUpdate:
                 ["roman", "italic"],
             )
 
+    @patch("httpx.get")
+    @patch("main.install_single_repo")
+    @patch("main.save_installed_data")
+    def test_update_with_changelog(
+        self,
+        mock_save: MagicMock,
+        mock_install: MagicMock,
+        mock_get: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        installed_data = {
+            "owner/repo": {
+                "font1.ttf": {
+                    "filename": "font1.ttf",
+                    "hash": "hash",
+                    "type": "ttf",
+                    "version": "1.0",
+                }
+            }
+        }
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "tag_name": "v2.0",
+            "body": "This is the changelog for v2.0.",
+        }
+        mock_get.return_value = mock_response
+        with (
+            patch("main.load_installed_data", return_value=installed_data),
+            patch("main.default_path", Path("/fake/path")),
+            patch("packaging.version.Version") as mock_version,
+            patch("pathlib.Path.exists", return_value=True) as mock_exists,
+            patch("pathlib.Path.unlink") as mock_unlink,
+        ):
+            mock_version.return_value = MagicMock(__gt__=lambda *_: True)  # type: ignore
+            result = runner.invoke(app, ["update", "owner/repo", "--changelog"])
+            assert result.exit_code == 0
+            assert "Updating owner/repo from 1.0 to v2.0..." in result.output
+            assert "Changelog for owner/repo v2.0:" in result.output
+            assert "This is the changelog for v2.0." in result.output
+            mock_install.assert_called_once_with(
+                "owner",
+                "repo",
+                "latest",
+                ["variable-ttf", "otf", "static-ttf"],
+                Path("/fake/path"),
+                False,
+                True,
+                [],
+                ["roman", "italic"],
+            )
+            # Assert old fonts are deleted
+            mock_exists.assert_called_once_with()
+            mock_unlink.assert_called_once_with()
+            # Assert installed_data is updated (repo removed before reinstall)
+            mock_save.assert_called_once()
+            saved_data = mock_save.call_args[0][0]
+            assert "owner/repo" not in saved_data
+
 
 class TestInstall:
     @patch("main.install_single_repo")
@@ -1000,9 +1058,10 @@ class TestFontFunctions:
         mock_response.raise_for_status.return_value = None
         mock_get.return_value = mock_response
 
-        version, assets = fetch_release_info("owner", "repo", "latest")
+        version, assets, body = fetch_release_info("owner", "repo", "latest")
         assert version == "v1.0"
         assert assets == []
+        assert body == ""
         mock_get.assert_called_once_with(
             "https://api.github.com/repos/owner/repo/releases/latest"
         )
@@ -1016,9 +1075,10 @@ class TestFontFunctions:
         mock_response.raise_for_status.return_value = None
         mock_get.return_value = mock_response
 
-        version, assets = fetch_release_info("owner", "repo", "2.0")
+        version, assets, body = fetch_release_info("owner", "repo", "2.0")
         assert version == "v2.0"
         assert assets == []
+        assert body == ""
         mock_get.assert_called_once_with(
             "https://api.github.com/repos/owner/repo/releases/tags/v2.0"
         )
@@ -1152,6 +1212,7 @@ class TestInstallSingleRepo:
         mock_fetch.return_value = (
             "4.1",
             [{"name": "inter.zip", "size": 1000, "browser_download_url": "url"}],
+            "Changelog here",
         )
 
         # Mock download and extract
@@ -1193,6 +1254,7 @@ class TestInstallSingleRepo:
         mock_fetch.return_value = (
             "4.1",
             [{"name": "inter.zip", "size": 1000, "browser_download_url": "url"}],
+            "Changelog here",
         )
 
         # Mock download and extract
