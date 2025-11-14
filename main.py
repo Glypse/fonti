@@ -17,6 +17,18 @@ app = typer.Typer()
 console = Console()
 
 
+class Asset(TypedDict):
+    name: str
+    size: int
+    browser_download_url: str
+
+
+class FontEntry(TypedDict):
+    filename: str
+    hash: str
+    type: str
+
+
 # Load default format from config file
 default_priorities = ["variable-ttf", "otf", "static-ttf"]
 default_path = Path.home() / "Desktop"
@@ -50,12 +62,6 @@ if config_file.exists():
         pass  # Ignore config errors
 
 
-class Asset(TypedDict):
-    name: str
-    size: int
-    browser_download_url: str
-
-
 def is_variable_font(font_path: str) -> bool:
     """
     Check if a font file is a variable font.
@@ -81,6 +87,15 @@ def install(
         "--local",
         "-l",
         help="Install fonts to current directory instead of default",
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Force reinstall even if already installed"
+    ),
+    keep_multiple: bool = typer.Option(
+        False,
+        "--keep-multiple",
+        "-km",
+        help="Allow installing multiple font types from the same repo",
     ),
 ):
     """
@@ -177,6 +192,26 @@ def install(
 
         console.print(f"Found archive: {archive_name}")
 
+        if not local:
+            installed_file = Path.home() / ".fontpm" / "installed.json"
+            if installed_file.exists():
+                try:
+                    with open(installed_file) as f:
+                        temp_data = json.load(f)
+                    installed_types = [
+                        entry.get("type")
+                        for entry in temp_data.get(repo_arg, [])
+                        if "type" in entry
+                    ]
+                    if installed_types and not keep_multiple and not force:
+                        console.print(
+                            f"[yellow]Already installed other types from {repo_arg}. "
+                            "Use --keep-multiple to install additional types or --force to overwrite.[/yellow]"
+                        )
+                        continue
+                except Exception:
+                    pass
+
         with tempfile.TemporaryDirectory() as temp_dir:
             extract_dir = Path(temp_dir)
 
@@ -224,22 +259,50 @@ def install(
 
             # Select fonts in order of preference
             selected_fonts: list[Path] = []
+            selected_pri = None
             for pri in priorities:
                 if pri == "variable-ttf" and variable_ttfs:
                     selected_fonts = variable_ttfs
+                    selected_pri = pri
                     break
                 elif pri == "otf" and otf_files:
                     selected_fonts = otf_files
+                    selected_pri = pri
                     break
                 elif pri == "static-ttf" and static_ttfs:
                     selected_fonts = static_ttfs
+                    selected_pri = pri
                     break
+
+            if selected_fonts and not local:
+                installed_file = Path.home() / ".fontpm" / "installed.json"
+                if installed_file.exists():
+                    try:
+                        with open(installed_file) as f:
+                            temp_data = json.load(f)
+                        installed_types = [
+                            entry.get("type")
+                            for entry in temp_data.get(repo_arg, [])
+                            if "type" in entry
+                        ]
+                        should_skip = False
+                        if selected_pri in installed_types:
+                            if not force:
+                                console.print(
+                                    f"[yellow]Already installed {selected_pri} from {repo_arg}. "
+                                    "Use --force to reinstall.[/yellow]"
+                                )
+                                should_skip = True
+                        if should_skip:
+                            continue
+                    except Exception:
+                        pass
 
             # Track installed fonts for global installs
             if selected_fonts and not local:
                 installed_file = Path.home() / ".fontpm" / "installed.json"
                 installed_file.parent.mkdir(exist_ok=True)
-                installed_data: Dict[str, List[Dict[str, str]]] = {}
+                installed_data: Dict[str, List[FontEntry]] = {}
                 if installed_file.exists():
                     try:
                         with open(installed_file) as f:
@@ -253,9 +316,14 @@ def install(
                 for font_file in selected_fonts:
                     try:
                         file_hash = hashlib.sha256(font_file.read_bytes()).hexdigest()
-                        installed_data[repo_key].append(
-                            {"filename": font_file.name, "hash": file_hash}
-                        )
+                        assert selected_pri is not None
+                        entry: FontEntry = {
+                            "filename": font_file.name,
+                            "hash": file_hash,
+                            "type": selected_pri,
+                        }
+                        if entry not in installed_data[repo_key]:
+                            installed_data[repo_key].append(entry)
                     except Exception as e:
                         console.print(
                             f"[yellow]Warning: Could not hash {font_file.name}: {e}[/yellow]"
@@ -349,7 +417,7 @@ def uninstall(
 
     try:
         with open(installed_file) as f:
-            installed_data: Dict[str, List[Dict[str, str]]] = json.load(f)
+            installed_data: Dict[str, List[FontEntry]] = json.load(f)
     except Exception as e:
         console.print(f"[red]Error loading installed data: {e}[/red]")
         raise typer.Exit(1) from e
@@ -363,7 +431,7 @@ def uninstall(
             continue
 
         fonts = installed_data[repo_arg]
-        remaining_fonts: List[Dict[str, str]] = []
+        remaining_fonts: List[FontEntry] = []
         for font_info in fonts:
             filename = font_info["filename"]
             expected_hash = font_info["hash"]
