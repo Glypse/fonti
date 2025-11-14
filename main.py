@@ -1158,9 +1158,6 @@ def import_fonts(
 
 @app.command()
 def fix(
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Show what would be fixed without making changes"
-    ),
     backup: bool = typer.Option(
         False, "--backup", help="Create a backup of installed.json before fixing"
     ),
@@ -1202,8 +1199,8 @@ def fix(
     for filename, repos in duplicates.items():
         console.print(f"  {filename}: {', '.join(repos)}")
 
-    if dry_run:
-        console.print("[blue]Dry run: No changes made.[/blue]")
+    if not typer.confirm("Proceed with fixes?", default=True):
+        console.print("[blue]Aborted.[/blue]")
         return
 
     # Remove duplicates: keep in the first repo, remove from others

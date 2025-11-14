@@ -1340,10 +1340,11 @@ class TestFix:
             },
         }
         with patch("main.load_installed_data", return_value=installed_data):
-            result = runner.invoke(app, ["fix"])
+            result = runner.invoke(app, ["fix"], input="y\n")
             assert result.exit_code == 0
             assert "Found 1 duplicate filename(s):" in result.output
             assert "font1.ttf: repo1, repo2" in result.output
+            assert "Proceed with fixes?" in result.output
             assert "Removed duplicate font1.ttf from repo2" in result.output
             assert "Removed empty repo repo2" in result.output
             assert "Fixed 1 duplicate entries." in result.output
@@ -1353,7 +1354,7 @@ class TestFix:
             assert "repo2" not in saved_data
 
     @patch("main.save_installed_data")
-    def test_fix_dry_run(self, mock_save: MagicMock, runner: CliRunner) -> None:
+    def test_fix_abort(self, mock_save: MagicMock, runner: CliRunner) -> None:
         installed_data = {
             "repo1": {
                 "font1.ttf": {
@@ -1373,10 +1374,11 @@ class TestFix:
             },
         }
         with patch("main.load_installed_data", return_value=installed_data):
-            result = runner.invoke(app, ["fix", "--dry-run"])
+            result = runner.invoke(app, ["fix"], input="n\n")
             assert result.exit_code == 0
             assert "Found 1 duplicate filename(s):" in result.output
-            assert "Dry run: No changes made." in result.output
+            assert "Proceed with fixes?" in result.output
+            assert "Aborted." in result.output
             mock_save.assert_not_called()
 
     @patch("shutil.copy")
