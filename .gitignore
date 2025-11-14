@@ -128,10 +128,8 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# IDE
-.vscode/
-.idea/
-
 # OS
 .DS_Store
 Thumbs.db
+
+.ruff_cache/

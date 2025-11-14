@@ -106,7 +106,7 @@ dependencies = [
     { name = "typer" },
 ]
 
-[package.optional-dependencies]
+[package.dev-dependencies]
 dev = [
     { name = "black" },
     { name = "isort" },
@@ -116,18 +116,21 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "black", marker = "extra == 'dev'", specifier = ">=22.0" },
     { name = "brotli", specifier = ">=1.2.0" },
     { name = "fonttools", specifier = ">=4.60.1" },
     { name = "httpx", specifier = ">=0.28.0" },
-    { name = "isort", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "pyinstaller", specifier = ">=6.16.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "rich", specifier = ">=14.0.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "typer", specifier = ">=0.20.0" },
 ]
-provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "black", specifier = ">=22.0" },
+    { name = "isort", specifier = ">=5.0" },
+    { name = "pytest", specifier = ">=6.0" },
+    { name = "ruff", specifier = ">=0.1.0" },
+]
 
 [[package]]
 name = "fonttools"
