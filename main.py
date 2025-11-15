@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import json
 import shutil
@@ -11,6 +12,7 @@ from typing import Any, Callable, Dict, List, Tuple, TypedDict
 
 import httpx
 import typer
+from cryptography.fernet import Fernet
 from diskcache import Cache  # type: ignore
 from fontTools.ttLib import TTFont  # type: ignore
 from platformdirs import user_cache_dir
@@ -40,9 +42,21 @@ VALID_FORMATS = [
 DEFAULT_PRIORITIES = ["variable-ttf", "otf", "static-ttf"]
 DEFAULT_PATH = Path.home() / "Library" / "Fonts"
 CONFIG_FILE = Path.home() / ".fontpm" / "config"
+KEY_FILE = CONFIG_FILE.parent / "key"
 INSTALLED_FILE = Path.home() / ".fontpm" / "installed.json"
 
 FORMAT_HELP = f"Comma-separated list of font formats to prefer[dim] (options: {', '.join(VALID_FORMATS)})[/dim]"  # noqa: E501
+
+
+def get_encryption_key() -> bytes:
+    """Get or generate the encryption key for secure config storage."""
+    if KEY_FILE.exists():
+        return KEY_FILE.read_bytes()
+    else:
+        key = Fernet.generate_key()
+        KEY_FILE.parent.mkdir(exist_ok=True)
+        KEY_FILE.write_bytes(key)
+        return key
 
 
 class Asset(TypedDict):
@@ -72,11 +86,14 @@ def get_base_and_ext(name: str) -> tuple[str, str]:
 
 
 # Load default format from config file
-def load_config() -> Tuple[List[str], Path, int]:
+def load_config() -> Tuple[List[str], Path, int, str]:
     """Load configuration from config file."""
     priorities = DEFAULT_PRIORITIES.copy()
     path = DEFAULT_PATH
     cache_size = 200 * 1024 * 1024  # 200MB default
+    github_token = ""
+
+    fernet = Fernet(get_encryption_key())
 
     if CONFIG_FILE.exists():
         try:
@@ -105,13 +122,25 @@ def load_config() -> Tuple[List[str], Path, int]:
                             console.print(
                                 "[yellow]Warning: Invalid cache-size, using default.[/yellow]"
                             )
+                    elif line.startswith("github_token="):
+                        encrypted_value = line.split("=", 1)[1].strip()
+                        try:
+                            github_token = fernet.decrypt(
+                                base64.b64decode(encrypted_value)
+                            ).decode()
+                        except Exception:
+                            console.print(
+                                "[yellow]Warning: Could not decrypt GitHub token.[/yellow]"
+                            )
         except Exception:
             console.print("[yellow]Warning: Could not load config file.[/yellow]")
 
-    return priorities, path, cache_size
+    return priorities, path, cache_size, github_token
 
 
-default_priorities, default_path, default_cache_size = load_config()
+default_priorities, default_path, default_cache_size, default_github_token = (
+    load_config()
+)
 
 # Cache setup
 CACHE_DIR = Path(user_cache_dir("fontpm"))
@@ -143,9 +172,15 @@ def set_config(key: str, value: str) -> None:
         except ValueError:
             console.print("[red]Invalid cache size: must be integer[/red]")
             raise typer.Exit(1) from None
+    elif key == "github_token":
+        fernet = Fernet(get_encryption_key())
+        encrypted = base64.b64encode(fernet.encrypt(value.encode())).decode()
+        value = encrypted
 
     current_config[key] = value
-    console.print(f"[green]Set {key} to: {value}[/green]")
+    console.print(
+        f"[green]Set {key} to: {'***' if key == 'github_token' else value}[/green]"
+    )
 
     try:
         with open(CONFIG_FILE, "w") as f:
@@ -246,10 +281,14 @@ def fetch_release_info(
     owner: str, repo_name: str, release: str
 ) -> Tuple[str, List[Asset], str]:
     """Fetch release information from GitHub API."""
+    headers: Dict[str, str] = {}
+    if default_github_token:
+        headers["Authorization"] = f"Bearer {default_github_token}"
+
     with console.status("[bold green]Fetching release info..."):
         if release == "latest":
             url = f"https://api.github.com/repos/{owner}/{repo_name}/releases/latest"
-            response = httpx.get(url, follow_redirects=True)
+            response = httpx.get(url, headers=headers, follow_redirects=True)
             response.raise_for_status()
         else:
             release_tag = release
@@ -257,13 +296,13 @@ def fetch_release_info(
                 release_tag = f"v{release}"
             url = f"https://api.github.com/repos/{owner}/{repo_name}/releases/tags/{release_tag}"
             try:
-                response = httpx.get(url, follow_redirects=True)
+                response = httpx.get(url, headers=headers, follow_redirects=True)
                 response.raise_for_status()
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 404 and not release.startswith("v"):
                     # Try without 'v'
                     url = f"https://api.github.com/repos/{owner}/{repo_name}/releases/tags/{release}"
-                    response = httpx.get(url, follow_redirects=True)
+                    response = httpx.get(url, headers=headers, follow_redirects=True)
                     response.raise_for_status()
                 else:
                     raise
@@ -828,12 +867,44 @@ def config_path(
     set_config("path", value)
 
 
-@config_app.command("cache-size")
-def config_cache_size(value: str = typer.Argument(..., help="Cache size in bytes")):
+@config_app.command("github-token")
+def config_github_token(
+    value: str = typer.Argument(..., help="GitHub personal access token")
+):
     """
-    Set the download cache size limit.
+    Set the GitHub personal access token for authenticated API requests.
+    [dim]Optional: will help if you're encountering rate limits. To create your token, follow this link: https://github.com/settings/tokens/new?description=fontpm&scopes=read:packages&default_expires_at=none[/dim]
     """
-    set_config("cache-size", value)
+    set_config("github_token", value)
+
+
+@config_app.command("test-auth")
+def config_test_auth():
+    """
+    Test GitHub authentication by checking the token validity.
+    """
+    if not default_github_token:
+        console.print(
+            "[red]No GitHub token set. Use 'fontpm config github-token <token>' to set one.[/red]"
+        )
+        return
+
+    try:
+        headers: Dict[str, str] = {"Authorization": f"Bearer {default_github_token}"}
+        response = httpx.get("https://api.github.com/user", headers=headers)
+        if response.status_code == 200:
+            user_data = response.json()
+            console.print(
+                f"[green]Authentication successful! Logged in as: {user_data['login']}[/green]"
+            )
+        elif response.status_code == 401:
+            console.print("[red]Authentication failed: Invalid token.[/red]")
+        else:
+            console.print(
+                f"[red]Authentication failed: HTTP {response.status_code}[/red]"
+            )
+    except Exception as e:
+        console.print(f"[red]Error testing authentication: {e}[/red]")
 
 
 @app.command()
@@ -972,7 +1043,10 @@ def update(
 
         try:
             url = f"https://api.github.com/repos/{owner}/{repo_name}/releases/latest"
-            response = httpx.get(url)
+            headers: Dict[str, str] = {}
+            if default_github_token:
+                headers["Authorization"] = f"Bearer {default_github_token}"
+            response = httpx.get(url, headers=headers)
             response.raise_for_status()
             release_data = response.json()
             latest_version = release_data["tag_name"]

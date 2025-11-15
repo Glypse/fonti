@@ -1,7 +1,7 @@
 import json
 import tempfile
 from pathlib import Path
-from typing import Iterator, List, Tuple, cast
+from typing import Any, Iterator, List, Tuple, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -56,66 +56,96 @@ class TestConfig:
             assert result.exit_code == 0
             assert "Set path to: /some/path" in result.output
 
-    def test_config_cache_size_valid(
+    def test_config_github_token_valid(
         self, runner: CliRunner, mock_config_file: Path
     ) -> None:
         with patch("main.CONFIG_FILE", mock_config_file):
-            result = runner.invoke(app, ["config", "cache-size", "100000000"])
+            result = runner.invoke(
+                app, ["config", "github-token", "ghp_1234567890abcdef"]
+            )
             assert result.exit_code == 0
-            assert "Set cache-size to: 100000000" in result.output
+            assert "Set github_token to: ***" in result.output
 
-    def test_config_cache_size_invalid(
-        self, runner: CliRunner, mock_config_file: Path
+    def test_config_test_auth_no_token(self, runner: CliRunner) -> None:
+        with patch("main.default_github_token", ""):
+            result = runner.invoke(app, ["config", "test-auth"])
+            assert result.exit_code == 0
+            assert "No GitHub token set" in result.output
+
+    @patch("httpx.get")
+    def test_config_test_auth_valid_token(
+        self, mock_get: MagicMock, runner: CliRunner
     ) -> None:
-        with patch("main.CONFIG_FILE", mock_config_file):
-            result = runner.invoke(app, ["config", "cache-size", "invalid"])
-            assert result.exit_code == 1
-            assert "Invalid cache size: must be integer" in result.output
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"login": "testuser"}
+        mock_get.return_value = mock_response
+        with patch("main.default_github_token", "token"):
+            result = runner.invoke(app, ["config", "test-auth"])
+            assert result.exit_code == 0
+            assert "Authentication successful! Logged in as: testuser" in result.output
+
+    @patch("httpx.get")
+    def test_config_test_auth_invalid_token(
+        self, mock_get: MagicMock, runner: CliRunner
+    ) -> None:
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        mock_get.return_value = mock_response
+        with patch("main.default_github_token", "invalid_token"):
+            result = runner.invoke(app, ["config", "test-auth"])
+            assert result.exit_code == 0
+            assert "Authentication failed: Invalid token." in result.output
 
 
 class TestConfigLoading:
     def test_load_config_no_file(self, temp_dir: Path) -> None:
         with patch("main.CONFIG_FILE", temp_dir / "nonexistent"):
-            priorities, path, cache_size = load_config()
+            priorities, path, cache_size, github_token = load_config()
             assert priorities == DEFAULT_PRIORITIES
             assert path == DEFAULT_PATH
             assert cache_size == 200 * 1024 * 1024
+            assert github_token == ""
 
     def test_load_config_valid_format(self, temp_dir: Path) -> None:
         config_file = temp_dir / "config"
         config_file.write_text("format=otf,variable-ttf\npath=/custom/path\n")
         with patch("main.CONFIG_FILE", config_file):
-            priorities, path, cache_size = load_config()
+            priorities, path, cache_size, github_token = load_config()
             assert priorities == ["otf", "variable-ttf"]
             assert path == Path("/custom/path")
             assert cache_size == 200 * 1024 * 1024
+            assert github_token == ""
 
     def test_load_config_invalid_format(self, temp_dir: Path) -> None:
         config_file = temp_dir / "config"
         config_file.write_text("format=invalid,format\n")
         with patch("main.CONFIG_FILE", config_file):
-            priorities, path, cache_size = load_config()
+            priorities, path, cache_size, github_token = load_config()
             assert priorities == DEFAULT_PRIORITIES  # Should fallback to default
             assert path == DEFAULT_PATH
             assert cache_size == 200 * 1024 * 1024
+            assert github_token == ""
 
     def test_load_config_auto_format(self, temp_dir: Path) -> None:
         config_file = temp_dir / "config"
         config_file.write_text("format=auto\n")
         with patch("main.CONFIG_FILE", config_file):
-            priorities, path, cache_size = load_config()
+            priorities, path, cache_size, github_token = load_config()
             assert priorities == DEFAULT_PRIORITIES  # auto should be ignored
             assert path == DEFAULT_PATH
             assert cache_size == 200 * 1024 * 1024
+            assert github_token == ""
 
     def test_load_config_empty_path(self, temp_dir: Path) -> None:
         config_file = temp_dir / "config"
         config_file.write_text("path=\n")
         with patch("main.CONFIG_FILE", config_file):
-            priorities, path, cache_size = load_config()
+            priorities, path, cache_size, github_token = load_config()
             assert priorities == DEFAULT_PRIORITIES
             assert path == DEFAULT_PATH  # empty path should be ignored
             assert cache_size == 200 * 1024 * 1024
+            assert github_token == ""
 
     def test_load_config_file_error(self, temp_dir: Path) -> None:
         config_file = temp_dir / "config"
@@ -126,19 +156,21 @@ class TestConfigLoading:
             patch("main.CONFIG_FILE", config_file),
             patch("builtins.open", side_effect=Exception("File error")),
         ):
-            priorities, path, cache_size = load_config()
+            priorities, path, cache_size, github_token = load_config()
             assert priorities == DEFAULT_PRIORITIES
             assert path == DEFAULT_PATH
             assert cache_size == 200 * 1024 * 1024
+            assert github_token == ""
 
     def test_load_config_with_cache_size(self, temp_dir: Path) -> None:
         config_file = temp_dir / "config"
         config_file.write_text("cache-size=100000000\n")
         with patch("main.CONFIG_FILE", config_file):
-            priorities, path, cache_size = load_config()
+            priorities, path, cache_size, github_token = load_config()
             assert priorities == DEFAULT_PRIORITIES
             assert path == DEFAULT_PATH
             assert cache_size == 100000000
+            assert github_token == ""
 
 
 class TestIsVariable:
@@ -585,7 +617,7 @@ class TestUpdate:
             },
         }
 
-        def mock_get_side_effect(url: str) -> MagicMock:
+        def mock_get_side_effect(url: str, **_kwargs: Any) -> MagicMock:
             if "repo1" in url:
                 mock_response = MagicMock()
                 mock_response.json.return_value = {"tag_name": "v2.0"}
@@ -1050,6 +1082,7 @@ class TestFontFunctions:
         assert pri == ""
 
     @patch("httpx.get")
+    @patch("main.default_github_token", "")
     def test_fetch_release_info_latest(self, mock_get: MagicMock) -> None:
         from main import fetch_release_info
 
@@ -1064,10 +1097,30 @@ class TestFontFunctions:
         assert body == ""
         mock_get.assert_called_once_with(
             "https://api.github.com/repos/owner/repo/releases/latest",
+            headers={},
             follow_redirects=True,
         )
 
     @patch("httpx.get")
+    @patch("main.default_github_token", "test_token")
+    def test_fetch_release_info_with_auth(self, mock_get: MagicMock) -> None:
+        from main import fetch_release_info
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"tag_name": "v1.0"}
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        version, _, _ = fetch_release_info("owner", "repo", "latest")
+        assert version == "v1.0"
+        mock_get.assert_called_once_with(
+            "https://api.github.com/repos/owner/repo/releases/latest",
+            headers={"Authorization": "Bearer test_token"},
+            follow_redirects=True,
+        )
+
+    @patch("httpx.get")
+    @patch("main.default_github_token", "")
     def test_fetch_release_info_specific_version(self, mock_get: MagicMock) -> None:
         from main import fetch_release_info
 
@@ -1082,6 +1135,7 @@ class TestFontFunctions:
         assert body == ""
         mock_get.assert_called_once_with(
             "https://api.github.com/repos/owner/repo/releases/tags/v2.0",
+            headers={},
             follow_redirects=True,
         )
 

@@ -11,7 +11,7 @@
 -   [x] Caching
     -   [ ] --info flag for the font before install
     -   [x] When local install/import, check if the font files aren't already cached or installed on the system; use those by preference
--   [ ] GitHub auth
+-   [x] GitHub auth
 -   [x] `fix` command to repair broken `installed.json` files (duplicates, etc)
 -   [x] Allow to see changelog
 
