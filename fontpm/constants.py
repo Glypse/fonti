@@ -1,0 +1,21 @@
+from pathlib import Path
+
+# Constants
+ARCHIVE_EXTENSIONS = [".zip", ".tar.xz", ".tar.gz", ".tgz"]
+VALID_FORMATS = [
+    "variable-ttf",
+    "otf",
+    "static-ttf",
+    "variable-woff2",
+    "variable-woff",
+    "static-woff2",
+    "static-woff",
+]
+DEFAULT_PRIORITIES = ["variable-ttf", "otf", "static-ttf"]
+DEFAULT_PATH = Path.home() / "Library" / "Fonts"
+DEFAULT_CACHE_SIZE = 200 * 1024 * 1024  # 200MB
+CONFIG_FILE = Path.home() / ".fontpm" / "config"
+KEY_FILE = CONFIG_FILE.parent / "key"
+INSTALLED_FILE = Path.home() / ".fontpm" / "installed.json"
+
+FORMAT_HELP = f"Comma-separated list of font formats to prefer[dim] (options: {', '.join(VALID_FORMATS)})[/dim]"
