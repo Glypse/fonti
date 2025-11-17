@@ -162,13 +162,16 @@ def config_path(
 
 @config_app.command("cache-size")
 def config_cache_size(
-    value: str = typer.Argument(..., help="Cache size in bytes (0 to disable caching, 'default' to reset)")
+    value: str = typer.Argument(
+        ..., help="Cache size in bytes (0 to disable caching, 'default' to reset)"
+    )
 ):
     """
     Set the download cache size. Set to 0 to disable caching entirely, or 'default' to reset to the default size.
     """
     if value.lower() == "default":
         from .config import CONFIG_FILE
+
         current_config: Dict[str, str] = {}
         if CONFIG_FILE.exists():
             with open(CONFIG_FILE) as f:
@@ -182,7 +185,9 @@ def config_cache_size(
         with open(CONFIG_FILE, "w") as f:
             for k, v in current_config.items():
                 f.write(f"{k}={v}\n")
-        console.print(f"[green]Reset cache-size to default: {DEFAULT_CACHE_SIZE}[/green]")
+        console.print(
+            f"[green]Reset cache-size to default: {DEFAULT_CACHE_SIZE}[/green]"
+        )
     else:
         set_config("cache-size", value)
 
