@@ -17,6 +17,8 @@
 -   [x] Auto-detect common fonts such as those from Google fonts, allowing the `install font version` syntax, for QoL
 -   [x] Install from repos without releases with the `fonts` folder
 -   [ ] If can't find font files in releases, in `fonts` folder, look for a font file in the repo without downloading the repo
+-   [ ] Add a no cache config option
+-   [x] Add a gf-only config option (only download the font files from the google fonts subdirectory, less granular but save bandwidth)
 
 ## V?.?
 

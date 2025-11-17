@@ -171,6 +171,19 @@ def config_github_token(
     set_config("github_token", value)
 
 
+@config_app.command("google-fonts-direct")
+def config_google_fonts_direct(
+    value: str = typer.Argument(
+        ...,
+        help="Set to 'true' or 'false' to enable/disable direct Google Fonts download",
+    )
+):
+    """
+    Set whether to always download Google Fonts directly from the Google Fonts repo subdirectory instead of searching for original repos.
+    """  # noqa: E501
+    set_config("google_fonts_direct", value)
+
+
 @config_app.command("test-auth")
 def config_test_auth():
     """

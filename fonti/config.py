@@ -12,6 +12,7 @@ from rich.console import Console
 from .constants import (
     CONFIG_FILE,
     DEFAULT_CACHE_SIZE,
+    DEFAULT_GOOGLE_FONTS_DIRECT,
     DEFAULT_PATH,
     DEFAULT_PRIORITIES,
     INSTALLED_FILE,
@@ -37,12 +38,13 @@ def get_encryption_key() -> bytes:
 
 
 # Load default format from config file
-def load_config() -> Tuple[List[str], Path, int, str]:
+def load_config() -> Tuple[List[str], Path, int, str, bool]:
     """Load configuration from config file."""
     priorities = DEFAULT_PRIORITIES.copy()
     path = DEFAULT_PATH
     cache_size = DEFAULT_CACHE_SIZE
     github_token = ""
+    google_fonts_direct = DEFAULT_GOOGLE_FONTS_DIRECT
 
     fernet = Fernet(get_encryption_key())
 
@@ -80,15 +82,22 @@ def load_config() -> Tuple[List[str], Path, int, str]:
                             console.print(
                                 "[yellow]Warning: Could not decrypt GitHub token.[/yellow]"
                             )
+                    elif line.startswith("google_fonts_direct="):
+                        value = line.split("=", 1)[1].strip().lower()
+                        google_fonts_direct = value in ("true", "1", "yes", "on")
         except Exception:
             console.print("[yellow]Warning: Could not load config file.[/yellow]")
 
-    return priorities, path, cache_size, github_token
+    return priorities, path, cache_size, github_token, google_fonts_direct
 
 
-default_priorities, default_path, default_cache_size, default_github_token = (
-    load_config()
-)
+(
+    default_priorities,
+    default_path,
+    default_cache_size,
+    default_github_token,
+    default_google_fonts_direct,
+) = load_config()
 
 # Cache setup
 CACHE_DIR = Path(user_cache_dir("fonti"))
@@ -124,6 +133,12 @@ def set_config(key: str, value: str) -> None:
         fernet = Fernet(get_encryption_key())
         encrypted = base64.b64encode(fernet.encrypt(value.encode())).decode()
         value = encrypted
+    elif key == "google_fonts_direct":
+        if value.lower() not in ("true", "false", "1", "0", "yes", "no", "on", "off"):
+            console.print(
+                "[red]Invalid value for google_fonts_direct: must be true/false[/red]"
+            )
+            raise typer.Exit(1)
 
     current_config[key] = value
     console.print(
