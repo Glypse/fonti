@@ -1,5 +1,5 @@
 [project]
-name = "fontpm"
+name = "fonti"
 version = "0.1.0"
 description = "A CLI tool to manage fonts by downloading from GitHub releases"
 readme = "README.md"
@@ -22,7 +22,7 @@ dependencies = [
 dev = ["pytest>=6.0", "black>=22.0", "isort>=5.0", "ruff>=0.1.0"]
 
 [project.scripts]
-fontpm = "fontpm.cli:app"
+fonti = "fonti.cli:app"
 
 [tool.uv]
 package = true

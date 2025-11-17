@@ -3,10 +3,10 @@
 -   [x] User preferences: prefer .otf, .ttf static or .ttf variable
 -   Auto-detect variable fonts through `fontTools`
 -   [x] Install GitHub fonts through the `install user/repo version` syntax
--   [x] Remove fonts installed **via fontpm only** through the `uninstall user/repo` syntax
--   [x] Updates fonts installed **via fontpm only** through the `update` syntax
+-   [x] Remove fonts installed **via fonti only** through the `uninstall user/repo` syntax
+-   [x] Updates fonts installed **via fonti only** through the `update` syntax
 -   [x] Support for non-global installations (example use case: woff2 install insisde of a web app repo)
--   [x] Enable importing/exporting `fontpm-fonts.json`
+-   [x] Enable importing/exporting `fonti-fonts.json`
 -   [x] Specify selected weight(s)
 -   [x] Caching
     -   [ ] --info flag for the font before install

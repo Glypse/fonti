@@ -166,7 +166,7 @@ def config_github_token(
 ):
     """
     Set the GitHub personal access token for authenticated API requests.
-    [dim]Optional: will help if you're encountering rate limits. To create your token, follow this link: https://github.com/settings/tokens/new?description=fontpm&scopes=read:packages&default_expires_at=none[/dim]
+    [dim]Optional: will help if you're encountering rate limits. To create your token, follow this link: https://github.com/settings/tokens/new?description=fonti&scopes=read:packages&default_expires_at=none[/dim]
     """
     set_config("github_token", value)
 
@@ -178,7 +178,7 @@ def config_test_auth():
     """
     if not default_github_token:
         console.print(
-            "[red]No GitHub token set. Use 'fontpm config github-token <token>' to set one.[/red]"
+            "[red]No GitHub token set. Use 'fonti config github-token <token>' to set one.[/red]"
         )
         return
 
@@ -238,7 +238,7 @@ def update(
 @app.command()
 def export(
     output: str = typer.Option(
-        "fontpm-fonts.json", "--output", "-o", help="Output file path"
+        "fonti-fonts.json", "--output", "-o", help="Output file path"
     ),
     stdout: bool = typer.Option(
         False, "--stdout", help="Output to stdout instead of file"
@@ -255,7 +255,7 @@ def export(
 @app.command("import")
 def import_fonts(
     file: str = typer.Option(
-        "fontpm-fonts.json",
+        "fonti-fonts.json",
         "--input",
         "-i",
         help="Path to the exported font library file",

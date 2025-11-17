@@ -91,7 +91,7 @@ default_priorities, default_path, default_cache_size, default_github_token = (
 )
 
 # Cache setup
-CACHE_DIR = Path(user_cache_dir("fontpm"))
+CACHE_DIR = Path(user_cache_dir("fonti"))
 CACHE = Cache(str(CACHE_DIR), size_limit=default_cache_size)
 
 
