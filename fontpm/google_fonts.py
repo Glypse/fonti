@@ -1,3 +1,4 @@
+import base64
 import tempfile
 import zipfile
 from pathlib import Path
@@ -9,7 +10,7 @@ from bs4 import BeautifulSoup
 from rich.console import Console
 
 from .config import CACHE, CACHE_DIR, default_github_token
-from .downloader import fetch_release_info
+from .downloader import fetch_release_info, get_subdirectory_version
 
 console = Console()
 
@@ -37,70 +38,67 @@ def fetch_google_fonts_repo(font_name: str) -> Tuple[str, str, Path | None, bool
             f"[yellow]Attempting to download subdirectory for {font_name}...[/yellow]"
         )
 
-        # Check cache first
-        from .downloader import get_subdirectory_version
-
-        version = get_subdirectory_version(font_name)
-        cache_key = f"{font_name}-{version.replace(':', '-')}.zip"
-        if cache_key in CACHE:
-            console.print(f"Using cached subdirectory: {cache_key}")
-            cached_zip = str(CACHE[cache_key])  # type: ignore
-            temp_dir = Path(tempfile.mkdtemp())
-            with zipfile.ZipFile(cached_zip, "r") as zip_ref:
-                zip_ref.extractall(temp_dir)
-            return "thegooglefontsrepo", font_name, temp_dir, True
-
-        # Download and cache
-        try:
-            # Use GitHub API to get contents of ofl/font_name
-            api_url = f"https://api.github.com/repos/google/fonts/contents/ofl/{font_name_lower}"
-            response = httpx.get(api_url, headers=headers)
-            if response.status_code == 404:
-                # Try ufl
-                api_url = f"https://api.github.com/repos/google/fonts/contents/ufl/{font_name_lower}"
+        dirs = ["ofl", "ufl", "apache"]
+        for dir in dirs:
+            try:
+                api_url = f"https://api.github.com/repos/google/fonts/contents/{dir}/{font_name_lower}"
                 response = httpx.get(api_url, headers=headers)
                 response.raise_for_status()
-            else:
-                response.raise_for_status()
-            contents = response.json()
-            # Filter for font files
-            font_files = [
-                item
-                for item in contents
-                if item["name"].endswith((".ttf", ".otf", ".woff", ".woff2"))
-                and item["type"] == "file"
-            ]
-            if not font_files:
-                raise ValueError(f"No font files found in subdirectory for {font_name}")
-            # Download them to temp dir
-            temp_dir = Path(tempfile.mkdtemp())
-            for item in font_files:
-                file_url = item["download_url"]
-                file_response = httpx.get(file_url, headers=headers)
-                file_response.raise_for_status()
-                file_path = temp_dir / item["name"]
-                file_path.write_bytes(file_response.content)
-            console.print(
-                f"[green]Downloaded {len(font_files)} font files for {font_name}.[/green]"
-            )
-            # Create zip and cache
-            zip_path = CACHE_DIR / cache_key
-            with zipfile.ZipFile(zip_path, "w") as zip_ref:
-                for file_path in temp_dir.rglob("*"):
-                    if file_path.is_file():
-                        zip_ref.write(file_path, file_path.relative_to(temp_dir))
-            CACHE[cache_key] = str(zip_path)
-            console.print("Subdirectory cached.")
-            return "thegooglefontsrepo", font_name, temp_dir, True
-        except Exception as e:
-            console.print(
-                f"[red]Failed to fetch subdirectory for {font_name}: {e}[/red]"
-            )
-            raise ValueError(f"Font '{font_name}' not found in Google Fonts.") from e
+                contents = response.json()
+                font_items = [
+                    item
+                    for item in contents
+                    if item["type"] == "file"
+                    and item["name"].endswith((".ttf", ".otf", ".woff", ".woff2"))
+                ]
+                if not font_items:
+                    continue
+                temp_dir = Path(tempfile.mkdtemp())
+                for item in font_items:
+                    blob_url = item["url"]
+                    headers_blob = headers.copy()
+                    headers_blob["Accept"] = "application/vnd.github.raw"
+                    blob_response = httpx.get(blob_url, headers=headers_blob)
+                    blob_response.raise_for_status()
+                    content = blob_response.content
+                    if content.startswith(b"{"):
+                        blob_data = blob_response.json()
+                        content = base64.b64decode(blob_data["content"])
+                    file_path = temp_dir / item["name"]
+                    file_path.write_bytes(content)
+                console.print(
+                    f"[green]Downloaded {len(font_items)} font files for {font_name} from {dir}.[/green]"
+                )
+                dir_font_name = f"{dir}/{font_name}"
+                version = get_subdirectory_version(dir_font_name)
+                cache_key = f"{dir_font_name}-{version.replace(':', '-')}.zip"
+                try:
+                    zip_path = CACHE_DIR / cache_key
+                    zip_path.parent.mkdir(parents=True, exist_ok=True)
+                    with zipfile.ZipFile(zip_path, "w") as zip_ref:
+                        for file_path in temp_dir.rglob("*"):
+                            if file_path.is_file():
+                                zip_ref.write(
+                                    file_path, file_path.relative_to(temp_dir)
+                                )
+                    CACHE[cache_key] = str(zip_path)
+                    console.print("Subdirectory cached.")
+                except Exception as e:
+                    console.print(
+                        f"[yellow]Warning: Failed to cache subdirectory: {e}[/yellow]"
+                    )
+                return "thegooglefontsrepo", dir_font_name, temp_dir, True
+            except Exception:
+                continue
+        console.print(
+            f"[red]Failed to fetch subdirectory for {font_name}: not found in any directory[/red]"
+        )
+        raise ValueError(f"Font '{font_name}' not found in Google Fonts.")
 
     urls = [
         f"https://raw.githubusercontent.com/google/fonts/main/ofl/{font_name_lower}/article/ARTICLE.en_us.html",
         f"https://raw.githubusercontent.com/google/fonts/main/ofl/{font_name_lower}/DESCRIPTION.en_us.html",
+        f"https://raw.githubusercontent.com/google/fonts/main/apache/{font_name_lower}/DESCRIPTION.en_us.html",
         f"https://raw.githubusercontent.com/google/fonts/main/ufl/{font_name_lower}/DESCRIPTION.en_us.html",
     ]
 

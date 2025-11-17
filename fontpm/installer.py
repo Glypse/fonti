@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, List
 
 import httpx
+from fontTools.ttLib import TTFont  # pyright: ignore[reportMissingTypeStubs]
 from rich.console import Console
 
 from .config import CACHE, CACHE_DIR, load_installed_data, save_installed_data
@@ -46,17 +47,29 @@ def install_fonts(
         return
 
     with console.status("[bold green]Moving fonts..."):
+        valid_fonts: List[Path] = []
         for font_file in selected_fonts:
-            shutil.move(str(font_file), str(dest_dir / font_file.name))
+            try:
+                TTFont(font_file)
+                valid_fonts.append(font_file)
+            except Exception as e:
+                if not font_file.name.startswith("._"):
+                    console.print(
+                        f"[yellow]Skipping invalid font file {font_file.name}: {e}[/yellow]"
+                    )
+                continue
 
-    number_installed_fonts = len(selected_fonts)
+    for font_file in valid_fonts:
+        shutil.move(str(font_file), str(dest_dir / font_file.name))
+
+    number_installed_fonts = len(valid_fonts)
 
     if not local:
         installed_data = load_installed_data()
         if repo_key not in installed_data:
             installed_data[repo_key] = {}
         previous_count = len(installed_data[repo_key])
-        for font_file in selected_fonts:
+        for font_file in valid_fonts:
             try:
                 file_hash = hashlib.sha256(
                     (dest_dir / font_file.name).read_bytes()
@@ -128,22 +141,6 @@ def install_single_repo(
             "Use --force to proceed.[/yellow]"
         )
         return
-
-    # Remove old fonts if any
-    if not local:
-        installed_data = load_installed_data()
-        if repo_key in installed_data:
-            fonts = installed_data[repo_key]
-            for font_info in fonts.values():
-                filename = font_info["filename"]
-                font_path = dest_dir / filename
-                if font_path.exists():
-                    try:
-                        font_path.unlink()
-                    except Exception as e:
-                        console.print(f"[red]Could not delete {filename}: {e}[/red]")
-            del installed_data[repo_key]
-            save_installed_data(installed_data)
 
     extract_dir = None
     try:
@@ -270,6 +267,37 @@ def install_single_repo(
         selected_fonts, selected_pri = select_fonts(
             categorized_fonts, priorities, weights, styles
         )
+
+        if not local:
+            installed_data = load_installed_data()
+            if repo_key in installed_data:
+                current_versions = {
+                    f["version"] for f in installed_data[repo_key].values()
+                }
+                if len(current_versions) == 1 and list(current_versions)[0] == version:
+                    if not force:
+                        console.print(
+                            f"[yellow]{repo_key} version {version} is already installed. "
+                            "Use --force to reinstall.[/yellow]"
+                        )
+                        return
+                    else:
+                        console.print(
+                            f"[yellow]Forcing reinstall of {repo_key} version {version}...[/yellow]"
+                        )
+                # Remove old fonts
+                for font_info in installed_data[repo_key].values():
+                    filename = font_info["filename"]
+                    font_path = dest_dir / filename
+                    if font_path.exists():
+                        try:
+                            font_path.unlink()
+                        except Exception as e:
+                            console.print(
+                                f"[red]Could not delete {filename}: {e}[/red]"
+                            )
+                del installed_data[repo_key]
+                save_installed_data(installed_data)
 
         install_fonts(
             selected_fonts,

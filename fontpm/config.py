@@ -56,10 +56,7 @@ def load_config() -> Tuple[List[str], Path, int, str]:
                         if value == "auto":
                             continue
                         parsed_priorities = [p.strip() for p in value.split(",")]
-                        if all(
-                            p in ["variable-ttf", "otf", "static-ttf"]
-                            for p in parsed_priorities
-                        ):
+                        if all(p in DEFAULT_PRIORITIES for p in parsed_priorities):
                             priorities = parsed_priorities
                     elif line.startswith("path="):
                         value = line.split("=", 1)[1].strip()

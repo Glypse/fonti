@@ -100,24 +100,31 @@ def get_base_and_ext(name: str) -> tuple[str, str]:
     return name, ""
 
 
-def get_subdirectory_version(font_name: str) -> str:
+def get_subdirectory_version(dir_font_name: str) -> str:
     """Get the last commit date for a Google Fonts subdirectory."""
     headers: Dict[str, str] = {}
     if default_github_token:
         headers["Authorization"] = f"Bearer {default_github_token}"
 
-    for path in [f"ofl/{font_name}", f"ufl/{font_name}"]:
-        try:
-            url = f"https://api.github.com/repos/google/fonts/commits?path={path}"
-            response = httpx.get(url, headers=headers)
-            response.raise_for_status()
-            commits = response.json()
-            if commits:
-                last_commit = commits[0]
-                date = last_commit["commit"]["committer"]["date"]
-                return date
-        except Exception:
-            continue
+    if "/" in dir_font_name:
+        dir_part, font_name = dir_font_name.split("/", 1)
+    else:
+        raise ValueError(
+            f"Invalid dir_font_name format: {dir_font_name}. Expected dir/font_name"
+        )
+
+    path = f"{dir_part}/{font_name}"
+    try:
+        url = f"https://api.github.com/repos/google/fonts/commits?path={path}"
+        response = httpx.get(url, headers=headers)
+        response.raise_for_status()
+        commits = response.json()
+        if commits:
+            last_commit = commits[0]
+            date = last_commit["commit"]["committer"]["date"]
+            return date
+    except Exception:
+        pass
     return "latest"
 
 
