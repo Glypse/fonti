@@ -1,7 +1,7 @@
 import base64
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import typer
 from cryptography.fernet import Fernet
@@ -101,7 +101,17 @@ def load_config() -> Tuple[List[str], Path, int, str, bool]:
 
 # Cache setup
 CACHE_DIR = Path(user_cache_dir("fonti"))
-CACHE = Cache(str(CACHE_DIR), size_limit=default_cache_size)
+cache: Optional[Cache] = None
+if default_cache_size == 0:
+    # Delete existing cache and disable caching
+    if CACHE_DIR.exists():
+        import shutil
+
+        shutil.rmtree(CACHE_DIR)
+        console.print("[green]Cache purged.[/green]")
+    cache = None
+else:
+    cache = Cache(str(CACHE_DIR), size_limit=default_cache_size)
 
 
 def set_config(key: str, value: str) -> None:

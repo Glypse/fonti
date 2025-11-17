@@ -10,7 +10,7 @@ import httpx
 from fontTools.ttLib import TTFont  # pyright: ignore[reportMissingTypeStubs]
 from rich.console import Console
 
-from .config import CACHE, CACHE_DIR, load_installed_data, save_installed_data
+from .config import CACHE_DIR, cache, load_installed_data, save_installed_data
 from .constants import VALID_FORMATS
 from .downloader import (
     download_fonts_dir,
@@ -177,25 +177,26 @@ def install_single_repo(
                         cache_key = (
                             f"{owner}-{repo_name}-fonts-{version.replace(':', '-')}.zip"
                         )
-                        if cache_key in CACHE:
+                        if cache is not None and cache_key in cache:
                             console.print(f"Using cached fonts directory: {cache_key}")
-                            cached_zip = str(CACHE[cache_key])  # type: ignore
+                            cached_zip = str(cache[cache_key])  # type: ignore
                             extract_dir = Path(tempfile.mkdtemp())
                             with zipfile.ZipFile(cached_zip, "r") as zip_ref:
                                 zip_ref.extractall(extract_dir)
                         else:
                             extract_dir = download_fonts_dir(owner, repo_name)
                             # Cache
-                            zip_path = CACHE_DIR / cache_key
-                            with zipfile.ZipFile(zip_path, "w") as zip_ref:
-                                for file_path in extract_dir.rglob("*"):
-                                    if file_path.is_file():
-                                        zip_ref.write(
-                                            file_path,
-                                            file_path.relative_to(extract_dir),
-                                        )
-                            CACHE[cache_key] = str(zip_path)
-                            console.print("Fonts directory cached.")
+                            if cache is not None:
+                                zip_path = CACHE_DIR / cache_key
+                                with zipfile.ZipFile(zip_path, "w") as zip_ref:
+                                    for file_path in extract_dir.rglob("*"):
+                                        if file_path.is_file():
+                                            zip_ref.write(
+                                                file_path,
+                                                file_path.relative_to(extract_dir),
+                                            )
+                                cache[cache_key] = str(zip_path)
+                                console.print("Fonts directory cached.")
                         is_subdirectory = True
                         final_owner = owner
                         final_repo_name = repo_name
@@ -215,13 +216,13 @@ def install_single_repo(
 
                 for ext in ARCHIVE_EXTENSIONS:
                     key = f"{owner}-{repo_name}-{version}{ext}"
-                    if key in CACHE:
+                    if cache is not None and key in cache:
                         cached_key = key
                         archive_ext = ext
                         break
             if cached_key:
                 console.print(f"Using cached archive: {cached_key}")
-                cached_archive_path = str(CACHE[cached_key])  # type: ignore
+                cached_archive_path = str(cache[cached_key])  # type: ignore
                 temp_dir = tempfile.mkdtemp()
                 extract_dir = Path(temp_dir)
 

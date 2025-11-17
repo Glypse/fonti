@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union, cast, overload
 import httpx
 from rich.console import Console
 
-from .config import CACHE, CACHE_DIR, default_github_token
+from .config import CACHE_DIR, cache, default_github_token
 from .constants import ARCHIVE_EXTENSIONS
 
 if TYPE_CHECKING:
@@ -290,9 +290,9 @@ def get_or_download_and_extract_archive(
         else f"{owner}-{repo_name}-{version}{archive_ext}"
     )
 
-    if key in CACHE:
+    if cache is not None and key in cache:
         console.print(f"Using cached archive: {key}")
-        cached_archive_path = str(CACHE[key])  # type: ignore
+        cached_archive_path = str(cache[key])  # type: ignore
         temp_dir = tempfile.mkdtemp()
         extract_dir = Path(temp_dir)
 
@@ -329,10 +329,11 @@ def get_or_download_and_extract_archive(
         console.print("Download complete.")
 
         # Copy to cache (diskcache will evict old entries if necessary)
-        cache_path = CACHE_DIR / f"{key}"
-        shutil.copy(tmp_path, cache_path)
-        CACHE[key] = str(cache_path)
-        console.print("Archive cached.")
+        if cache is not None:
+            cache_path = CACHE_DIR / f"{key}"
+            shutil.copy(tmp_path, cache_path)
+            cache[key] = str(cache_path)
+            console.print("Archive cached.")
 
         with console.status("[bold green]Extracting..."):
             if archive_ext == ".zip":

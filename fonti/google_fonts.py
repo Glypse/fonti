@@ -9,7 +9,7 @@ import typer
 from bs4 import BeautifulSoup
 from rich.console import Console
 
-from .config import CACHE, CACHE_DIR, default_github_token, default_google_fonts_direct
+from .config import CACHE_DIR, cache, default_github_token, default_google_fonts_direct
 from .downloader import fetch_release_info, get_subdirectory_version
 
 console = Console()
@@ -77,8 +77,9 @@ def download_subdirectory(font_name: str) -> Tuple[str, str, Path, bool]:
                     for file_path in temp_dir.rglob("*"):
                         if file_path.is_file():
                             zip_ref.write(file_path, file_path.relative_to(temp_dir))
-                CACHE[cache_key] = str(zip_path)
-                console.print("Subdirectory cached.")
+                if cache is not None:
+                    cache[cache_key] = str(zip_path)
+                    console.print("Subdirectory cached.")
             except Exception as e:
                 console.print(
                     f"[yellow]Warning: Failed to cache subdirectory: {e}[/yellow]"
