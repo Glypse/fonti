@@ -15,6 +15,7 @@ DEFAULT_PRIORITIES = ["variable-ttf", "otf", "static-ttf"]
 DEFAULT_PATH = Path.home() / "Library" / "Fonts"
 DEFAULT_CACHE_SIZE = 20 * 1024 * 1024  # 20MB
 DEFAULT_GOOGLE_FONTS_DIRECT = False
+DEFAULT_REGISTRY_CHECK_INTERVAL = 24 * 60 * 60  # 24 hours in seconds
 CONFIG_FILE = Path.home() / ".fonti" / "config"
 KEY_FILE = CONFIG_FILE.parent / "key"
 INSTALLED_FILE = Path.home() / ".fonti" / "installed.json"

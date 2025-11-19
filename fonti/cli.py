@@ -103,6 +103,11 @@ def install(
 
     parsed_styles = ["roman", "italic"] if style == "both" else [style]
 
+    # Update registry if needed
+    from .registry import update_registry
+
+    update_registry()
+
     dest_dir = Path.cwd() if local else default_path
     dest_dir.mkdir(exist_ok=True)
 
@@ -216,8 +221,26 @@ def config_google_fonts_direct(
     set_config("google_fonts_direct", value)
 
 
-@config_app.command("test-auth")
-def config_test_auth():
+@config_app.command("registry-check-interval")
+def config_registry_check_interval(
+    value: str = typer.Argument(
+        ..., help="Registry check interval in seconds (default: 86400 for 24 hours)"
+    )
+):
+    """
+    Set the interval for checking registry updates in seconds.
+    """
+    set_config("registry_check_interval", value)
+
+
+@config_app.command("update-registry")
+def config_update_registry():
+    """
+    Manually update the Google Fonts registry.
+    """
+    from .registry import update_registry
+
+    update_registry(force=True)
     """
     Test GitHub authentication by checking the token validity.
     """
@@ -264,20 +287,20 @@ def uninstall(
 
 @app.command()
 def update(
-    repo: List[str] = typer.Argument(  # noqa: B008
-        default_factory=list,
-        help="GitHub repository in format owner/repo. If not specified, update all.",
+    repo: str = typer.Argument(
+        None, help="Specific repos to update (leave empty for all)"
     ),
-    changelog: bool = typer.Option(
-        False, "--changelog", "-c", help="Display changelog of updated releases"
-    ),
+    changelog: bool = typer.Option(False, "--changelog", help="Show changelog"),
 ):
     """
     Update installed fonts to the latest versions.
     """
+    repos = [repo] if repo else []
+    from .registry import update_registry
     from .updater import update_fonts
 
-    update_fonts(repo, changelog)
+    update_registry()
+    update_fonts(repos, changelog)
 
 
 @app.command()

@@ -16,6 +16,7 @@ dependencies = [
     "platformdirs>=4.5.0",
     "cryptography>=46.0.3",
     "beautifulsoup4>=4.14.2",
+    "gitpython>=3.1.45",
 ]
 
 [dependency-groups]

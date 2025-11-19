@@ -15,6 +15,7 @@ from .constants import (
     DEFAULT_GOOGLE_FONTS_DIRECT,
     DEFAULT_PATH,
     DEFAULT_PRIORITIES,
+    DEFAULT_REGISTRY_CHECK_INTERVAL,
     INSTALLED_FILE,
     KEY_FILE,
     VALID_FORMATS,
@@ -38,13 +39,14 @@ def get_encryption_key() -> bytes:
 
 
 # Load default format from config file
-def load_config() -> Tuple[List[str], Path, int, str, bool]:
+def load_config() -> Tuple[List[str], Path, int, str, bool, int]:
     """Load configuration from config file."""
     priorities = DEFAULT_PRIORITIES.copy()
     path = DEFAULT_PATH
     cache_size = DEFAULT_CACHE_SIZE
     github_token = ""
     google_fonts_direct = DEFAULT_GOOGLE_FONTS_DIRECT
+    registry_check_interval = DEFAULT_REGISTRY_CHECK_INTERVAL
 
     fernet = Fernet(get_encryption_key())
 
@@ -82,13 +84,25 @@ def load_config() -> Tuple[List[str], Path, int, str, bool]:
                             console.print(
                                 "[yellow]Warning: Could not decrypt GitHub token.[/yellow]"
                             )
-                    elif line.startswith("google_fonts_direct="):
-                        value = line.split("=", 1)[1].strip().lower()
-                        google_fonts_direct = value in ("true", "1", "yes", "on")
+                    elif line.startswith("registry_check_interval="):
+                        value = line.split("=", 1)[1].strip()
+                        try:
+                            registry_check_interval = int(value)
+                        except ValueError:
+                            console.print(
+                                "[yellow]Warning: Invalid registry_check_interval, using default.[/yellow]"
+                            )
         except Exception:
             console.print("[yellow]Warning: Could not load config file.[/yellow]")
 
-    return priorities, path, cache_size, github_token, google_fonts_direct
+    return (
+        priorities,
+        path,
+        cache_size,
+        github_token,
+        google_fonts_direct,
+        registry_check_interval,
+    )
 
 
 (
@@ -97,6 +111,7 @@ def load_config() -> Tuple[List[str], Path, int, str, bool]:
     default_cache_size,
     default_github_token,
     default_google_fonts_direct,
+    default_registry_check_interval,
 ) = load_config()
 
 # Cache setup
@@ -143,12 +158,12 @@ def set_config(key: str, value: str) -> None:
         fernet = Fernet(get_encryption_key())
         encrypted = base64.b64encode(fernet.encrypt(value.encode())).decode()
         value = encrypted
-    elif key == "google_fonts_direct":
-        if value.lower() not in ("true", "false", "1", "0", "yes", "no", "on", "off"):
-            console.print(
-                "[red]Invalid value for google_fonts_direct: must be true/false[/red]"
-            )
-            raise typer.Exit(1)
+    elif key == "registry_check_interval":
+        try:
+            int(value)
+        except ValueError:
+            console.print("[red]Invalid registry_check_interval: must be integer[/red]")
+            raise typer.Exit(1) from None
 
     current_config[key] = value
     console.print(
