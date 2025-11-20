@@ -93,34 +93,31 @@ def update_registry(force: bool = False) -> None:
         last_check = float(metadata["last_check"])
         last_commit = str(metadata["last_commit"])
 
-    if (
-        not force
-        and now - last_check < REGISTRY_CHECK_INTERVAL
-        and current_commit == last_commit
-    ):
-        logger.debug("Registry is up to date")
-        return  # No need to update
+    if not force and now - last_check < REGISTRY_CHECK_INTERVAL:
+        logger.debug("Registry check interval not passed")
+        return  # No need to check yet
 
-    console.print("[yellow]Updating registry...[/yellow]")
-    logger.info("Updating registry")
-    # Fetch latest
-    logger.debug("Fetching latest registry updates")
-    repo.remotes.origin.fetch(depth=1)
-    repo.git.reset("--hard", "origin/main")
-
-    new_commit = repo.head.commit.hexsha
-    if cache:
-        cache["registry_last_check"] = now
-        cache["registry_last_commit"] = new_commit
-    else:
-        save_metadata({"last_check": now, "last_commit": new_commit})
-
-    if new_commit != current_commit:
-        console.print("[green]Registry updated.[/green]")
-        logger.info("Registry updated to new commit")
-    else:
+    # Check if commit changed
+    if current_commit == last_commit:
         console.print("[green]Registry is up to date.[/green]")
         logger.info("Registry was already up to date")
+    else:
+        console.print("[yellow]Updating registry...[/yellow]")
+        logger.info("Updating registry")
+        # Fetch latest
+        logger.debug("Fetching latest registry updates")
+        repo.remotes.origin.fetch(depth=1)
+        repo.git.reset("--hard", "origin/main")
+
+        console.print("[green]Registry updated.[/green]")
+        logger.info("Registry updated to new commit")
+
+    # Update last_check and last_commit
+    if cache:
+        cache["registry_last_check"] = now
+        cache["registry_last_commit"] = current_commit
+    else:
+        save_metadata({"last_check": now, "last_commit": current_commit})
 
 
 def search_registry(font_name: str) -> Optional[Dict[str, str]]:
