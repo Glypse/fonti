@@ -243,10 +243,17 @@ def config_registry_check_interval(
 
 
 @config_app.command("update-registry")
-def config_update_registry():
+def config_update_registry(
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Enable verbose logging"
+    ),
+):
     """
     Manually update the Google Fonts registry.
     """
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
+
     from .registry import update_registry
 
     update_registry(force=True)
@@ -285,10 +292,16 @@ def uninstall(
     force: bool = typer.Option(
         False, "--force", "-f", help="Force deletion even if hashes don't match"
     ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Enable verbose logging"
+    ),
 ):
     """
     Uninstall fonts from a GitHub repository.
     """
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
+
     from .uninstaller import uninstall_fonts
 
     uninstall_fonts(repo, force)
@@ -326,10 +339,16 @@ def export(
     stdout: bool = typer.Option(
         False, "--stdout", help="Output to stdout instead of file"
     ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Enable verbose logging"
+    ),
 ):
     """
     Export the installed font library to a shareable file.
     """
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
+
     from .library import export_fonts
 
     export_fonts(output, stdout)
@@ -350,10 +369,16 @@ def import_fonts(
         "-l",
         help="Install fonts to current directory instead of default",
     ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Enable verbose logging"
+    ),
 ):
     """
     Import a font library from an exported file.
     """
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
+
     from .library import import_fonts as import_fonts_func
 
     import_fonts_func(file, force, local)
@@ -367,30 +392,50 @@ def fix(
     granular: bool = typer.Option(
         False, "--granular", "-g", help="Ask for confirmation for each fix individually"
     ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Enable verbose logging"
+    ),
 ):
     """
     Fix the installed.json file by removing duplicates and other issues.
     """
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
+
     from .library import fix_fonts
 
     fix_fonts(backup, granular)
 
 
 @app.command()
-def list():
+def list(
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Enable verbose logging"
+    ),
+):
     """
     List all installed font families with their files, types, versions, and source links.
     """
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
+
     from .library import list_fonts
 
     list_fonts()
 
 
 @cache_app.command("purge")
-def purge():
+def purge(
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Enable verbose logging"
+    ),
+):
     """
     Purge the download cache.
     """
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
+
     if cache is None:
         console.print("[yellow]Caching is disabled.[/yellow]")
     else:

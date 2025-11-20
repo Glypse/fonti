@@ -42,10 +42,12 @@ def install_fonts(
     local: bool,
 ) -> None:
     """Install selected fonts to destination directory and update installed data."""
+    logger.info(f"Installing {len(selected_fonts)} fonts to {dest_dir}")
     if not selected_fonts:
         console.print(
             f"[yellow]No font files found in the archive for {owner}/{repo_name}.[/yellow]"
         )
+        logger.warning(f"No fonts found for {owner}/{repo_name}")
         return
 
     with console.status("[bold green]Moving fonts..."):
@@ -54,12 +56,15 @@ def install_fonts(
             try:
                 TTFont(font_file)
                 valid_fonts.append(font_file)
+                logger.debug(f"Validated font: {font_file.name}")
             except Exception as e:
                 if not font_file.name.startswith("._"):
                     console.print(
                         f"[yellow]Skipping invalid font file {font_file.name}: {e}[/yellow]"
                     )
                 continue
+
+    logger.info(f"Validated {len(valid_fonts)} out of {len(selected_fonts)} fonts")
 
     for font_file in valid_fonts:
         dest_path = dest_dir / font_file.name
@@ -86,6 +91,7 @@ def install_fonts(
                     "repo_name": repo_name,
                 }
                 installed_data[repo_key][font_file.name] = entry
+                logger.debug(f"Added to installed data: {font_file.name}")
             except Exception as e:
                 console.print(
                     f"[yellow]Warning: Could not hash {font_file.name}: {e}[/yellow]"
@@ -96,6 +102,9 @@ def install_fonts(
     console.print(
         f"[green]Moved {number_installed_fonts} font{'' if number_installed_fonts == 1 else 's'} from "
         f"{owner}/{repo_name} to: {dest_dir}[/green]"
+    )
+    logger.info(
+        f"Successfully installed {number_installed_fonts} fonts from {owner}/{repo_name}"
     )
 
 
@@ -130,6 +139,7 @@ def install_single_repo(
     """
     repo_arg = f"{owner}/{repo_name}"
     console.print(f"[bold]Installing from {repo_arg}...[/bold]")
+    logger.info(f"Starting installation of {repo_arg}")
 
     # Warn for WOFF/WOFF2 global install
     if (
@@ -144,6 +154,7 @@ def install_single_repo(
             "[yellow]Installing WOFF/WOFF2 fonts globally is not recommended. "
             "Use --force to proceed.[/yellow]"
         )
+        logger.warning("WOFF/WOFF2 global install blocked without --force")
         return
 
     extract_dir = None
@@ -350,6 +361,7 @@ def install_single_repo(
         selected_fonts, selected_pri = select_fonts(
             categorized_fonts, priorities, weights, styles
         )
+        logger.info(f"Selected {len(selected_fonts)} fonts matching criteria")
 
         if not local:
             installed_data = load_installed_data()
@@ -363,17 +375,22 @@ def install_single_repo(
                             f"[yellow]{repo_key} version {version} is already installed. "
                             "Use --force to reinstall.[/yellow]"
                         )
+                        logger.info(
+                            f"Skipping {repo_key}: already installed at version {version}"
+                        )
                         return
                     else:
                         console.print(
                             f"[yellow]Forcing reinstall of {repo_key} version {version}...[/yellow]"
                         )
+                        logger.info(f"Forcing reinstall of {repo_key}")
                 # Remove old fonts
                 for filename in installed_data[repo_key]:
                     font_path = dest_dir / filename
                     if font_path.exists():
                         try:
                             font_path.unlink()
+                            logger.debug(f"Removed old font: {filename}")
                         except Exception as e:
                             console.print(
                                 f"[red]Could not delete {filename}: {e}[/red]"
@@ -394,6 +411,7 @@ def install_single_repo(
 
     except Exception as e:
         console.print(f"[red]Error installing from {repo_arg}: {e}[/red]")
+        logger.error(f"Installation failed for {repo_arg}: {e}")
         raise
     finally:
         if extract_dir:

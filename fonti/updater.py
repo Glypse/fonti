@@ -21,6 +21,7 @@ def update_fonts(repo: List[str], changelog: bool) -> None:
     """
     Update installed fonts to the latest versions.
     """
+    logger.info("Updating installed fonts")
     installed_data = load_installed_data()
     if not installed_data:
         console.print("[yellow]No installed fonts data found.[/yellow]")

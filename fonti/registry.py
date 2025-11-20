@@ -59,16 +59,19 @@ def get_registry_data() -> Dict[str, Dict[str, Dict[str, str]]]:
 def clone_registry() -> None:
     """Clone the registry repository with sparse checkout for only the JSON file."""
     console.print("[yellow]Cloning registry repository...[/yellow]")
+    logger.info("Cloning registry repository")
     REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
     logger.debug(f"Cloning registry from {REGISTRY_REPO_URL} to {REGISTRY_DIR}")
     repo = Repo.clone_from(REGISTRY_REPO_URL, REGISTRY_DIR, depth=1, no_checkout=True)
     repo.git.sparse_checkout("set", "--no-cone", "registry/fonti_registry.json")
     repo.git.checkout()
     console.print("[green]Registry cloned.[/green]")
+    logger.info("Registry cloned successfully")
 
 
 def update_registry(force: bool = False) -> None:
     """Update the registry if it's been more than 24 hours or if commit changed."""
+    logger.debug("Checking if registry needs update")
     if not REGISTRY_DIR.exists():
         clone_registry()
         return
@@ -95,9 +98,11 @@ def update_registry(force: bool = False) -> None:
         and now - last_check < REGISTRY_CHECK_INTERVAL
         and current_commit == last_commit
     ):
+        logger.debug("Registry is up to date")
         return  # No need to update
 
     console.print("[yellow]Updating registry...[/yellow]")
+    logger.info("Updating registry")
     # Fetch latest
     logger.debug("Fetching latest registry updates")
     repo.remotes.origin.fetch(depth=1)
@@ -112,8 +117,10 @@ def update_registry(force: bool = False) -> None:
 
     if new_commit != current_commit:
         console.print("[green]Registry updated.[/green]")
+        logger.info("Registry updated to new commit")
     else:
         console.print("[green]Registry is up to date.[/green]")
+        logger.info("Registry was already up to date")
 
 
 def search_registry(font_name: str) -> Optional[Dict[str, str]]:

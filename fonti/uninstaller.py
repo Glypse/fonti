@@ -1,4 +1,5 @@
 import hashlib
+import logging
 from typing import TYPE_CHECKING, Dict, List
 
 from rich.console import Console
@@ -9,12 +10,14 @@ if TYPE_CHECKING:
     from .types import FontEntry
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 
 def uninstall_fonts(repo: List[str], force: bool) -> None:
     """
     Uninstall fonts from a GitHub repository.
     """
+    logger.info(f"Uninstalling fonts from {repo}")
     installed_data = load_installed_data()
     if not installed_data:
         console.print("[yellow]No installed fonts data found.[/yellow]")

@@ -33,9 +33,11 @@ def export_fonts(output: str, stdout: bool) -> None:
     """
     Export the installed font library to a shareable file.
     """
+    logger.info("Exporting installed fonts")
     data = load_installed_data()
     if not data:
         console.print("[yellow]No installed fonts data found.[/yellow]")
+        logger.warning("No fonts to export")
         return
 
     exported: Dict[str, Dict[str, ExportedFontEntry]] = {}
@@ -69,6 +71,7 @@ def import_fonts(file: str, force: bool, local: bool) -> None:
     """
     Import a font library from an exported file.
     """
+    logger.info(f"Importing fonts from {file}")
     try:
         logger.debug(f"Loading exported data from {file}")
         with open(file) as f:
@@ -117,6 +120,7 @@ def fix_fonts(backup: bool, granular: bool) -> None:
     """
     Fix the installed.json file by removing duplicates and other issues.
     """
+    logger.info("Fixing installed fonts data")
     installed_data = load_installed_data()
     if not installed_data:
         console.print("[yellow]No installed fonts data found.[/yellow]")
@@ -344,6 +348,7 @@ def list_fonts() -> None:
     """
     List all installed font families with their files, types, versions, and source links.
     """
+    logger.debug("Listing installed fonts")
     data = load_installed_data()
     if not data:
         console.print("[yellow]No installed fonts found.[/yellow]")

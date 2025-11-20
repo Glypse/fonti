@@ -194,6 +194,7 @@ def fetch_release_info(
     owner: str, repo_name: str, release: str
 ) -> Tuple[str, List[Asset], str, str, str]:
     """Fetch release information from GitHub API."""
+    logger.info(f"Fetching release info for {owner}/{repo_name}")
     headers: Dict[str, str] = {}
     if default_github_token:
         headers["Authorization"] = f"Bearer {default_github_token}"
@@ -211,6 +212,7 @@ def fetch_release_info(
                     version = get_subdirectory_version(repo_name)
                     return version, [], "", owner, repo_name
                 else:
+                    logger.error(f"Failed to fetch latest release: {e}")
                     raise
         else:
             release_tag = release
@@ -228,6 +230,7 @@ def fetch_release_info(
                     response = httpx.get(url, headers=headers, follow_redirects=True)
                     response.raise_for_status()
                 else:
+                    logger.error(f"Failed to fetch release {release}: {e}")
                     raise
 
         release_data: Dict[str, Any] = response.json()
@@ -297,8 +300,10 @@ def get_or_download_and_extract_archive(
         if is_google_fonts
         else f"{owner}-{repo_name}-{version}{archive_ext}"
     )
+    logger.debug(f"Checking cache for key {key}")
 
     if cache is not None and key in cache:
+        logger.info(f"Using cached archive: {key}")
         console.print(f"Using cached archive: {key}")
         cached_archive_path = str(cache[key])  # type: ignore
         temp_dir = tempfile.mkdtemp()
@@ -317,6 +322,7 @@ def get_or_download_and_extract_archive(
 
         return extract_dir
     else:
+        logger.info(f"Downloading archive: {archive_name}")
         console.print(f"Downloading archive: {archive_name}")
         temp_dir = tempfile.mkdtemp()
         extract_dir = Path(temp_dir)
@@ -336,6 +342,7 @@ def get_or_download_and_extract_archive(
                         f.write(chunk)
 
         console.print("Download complete.")
+        logger.info("Archive downloaded successfully")
 
         # Copy to cache (diskcache will evict old entries if necessary)
         if cache is not None:
@@ -343,6 +350,7 @@ def get_or_download_and_extract_archive(
             shutil.copy(tmp_path, cache_path)
             cache[key] = str(cache_path)
             console.print("Archive cached.")
+            logger.debug("Archive cached")
 
         with console.status("[bold green]Extracting..."):
             if archive_ext == ".zip":
@@ -355,4 +363,5 @@ def get_or_download_and_extract_archive(
                     safe_members = _get_safe_members(archive_ref, "tar", extract_dir)
                     archive_ref.extractall(extract_dir, members=safe_members)
 
+        logger.info("Archive extracted")
         return extract_dir
