@@ -17,6 +17,7 @@ dependencies = [
     "cryptography>=46.0.3",
     "beautifulsoup4>=4.14.2",
     "gitpython>=3.1.45",
+    "pywin32>=311; sys_platform == 'win32'",
 ]
 
 [dependency-groups]

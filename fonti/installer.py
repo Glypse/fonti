@@ -107,6 +107,13 @@ def install_fonts(
         f"Successfully installed {number_installed_fonts} fonts from {owner}/{repo_name}"
     )
 
+    # Register fonts with the system if not local
+    if not local:
+        from .platform_utils import register_fonts
+
+        installed_paths = [dest_dir / f.name for f in valid_fonts]
+        register_fonts(installed_paths)
+
 
 def install_single_repo(
     owner: str,

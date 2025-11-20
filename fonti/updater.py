@@ -1,8 +1,11 @@
 import logging
-from typing import List, Tuple
+from typing import TYPE_CHECKING, List, Tuple
 
 from packaging.version import Version
 from rich.console import Console
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from .config import (
     default_path,
@@ -145,6 +148,17 @@ def update_fonts(repo: List[str], changelog: bool) -> None:
         )
         # Uninstall old
         dest_dir = default_path
+        old_paths: List[Path] = []
+        for filename in fonts:
+            font_path = dest_dir / filename
+            if font_path.exists():
+                old_paths.append(font_path)
+        # Unregister old fonts
+        if old_paths:
+            from .platform_utils import unregister_fonts
+
+            unregister_fonts(old_paths)
+        # Delete old files
         for filename in fonts:
             font_path = dest_dir / filename
             if font_path.exists():

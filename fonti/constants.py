@@ -1,3 +1,4 @@
+import platform
 from pathlib import Path
 
 # Constants
@@ -12,7 +13,16 @@ VALID_FORMATS = [
     "static-woff",
 ]
 DEFAULT_PRIORITIES = ["variable-ttf", "otf", "static-ttf"]
-DEFAULT_PATH = Path.home() / "Library" / "Fonts"
+
+# Platform-specific default font directory
+system = platform.system()
+if system == "Windows":
+    DEFAULT_PATH = Path.home() / "AppData" / "Local" / "Microsoft" / "Windows" / "Fonts"  # type: ignore[reportConstantRedefinition]
+elif system == "Linux":
+    DEFAULT_PATH = Path.home() / ".fonts"  # type: ignore[reportConstantRedefinition]
+else:  # macOS and others
+    DEFAULT_PATH = Path.home() / "Library" / "Fonts"  # type: ignore[reportConstantRedefinition]
+
 DEFAULT_CACHE_SIZE = 20 * 1024 * 1024  # 20MB
 DEFAULT_GOOGLE_FONTS_DIRECT = False
 DEFAULT_REGISTRY_CHECK_INTERVAL = 24 * 60 * 60  # 24 hours in seconds

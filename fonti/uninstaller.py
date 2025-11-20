@@ -25,6 +25,7 @@ def uninstall_fonts(repo: List[str], force: bool) -> None:
 
     dest_dir = default_path
     deleted_count = 0
+    deleted_paths: List[str] = []
 
     for repo_arg in repo:
         if "/" in repo_arg:
@@ -71,6 +72,7 @@ def uninstall_fonts(repo: List[str], force: bool) -> None:
                     font_path.unlink()
                     console.print(f"[green]Deleted {filename} from {repo_arg}.[/green]")
                     deleted_count += 1
+                    deleted_paths.append(str(font_path))
                 except Exception as e:
                     console.print(f"[red]Could not delete {filename}: {e}[/red]")
                     remaining[filename] = entry
@@ -91,3 +93,7 @@ def uninstall_fonts(repo: List[str], force: bool) -> None:
         console.print(
             f"[green]Uninstalled {deleted_count} font{'' if deleted_count == 1 else 's'}.[/green]"
         )
+        # Unregister fonts from system
+        from .platform_utils import unregister_fonts
+
+        unregister_fonts([default_path / p for p in deleted_paths])
