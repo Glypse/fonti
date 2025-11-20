@@ -25,7 +25,7 @@ def parse_repo(repo_arg: str) -> Tuple[str, str]:
         raise ValueError(f"Invalid repo format: {repo_arg}. Use owner/repo") from e
 
 
-def download_subdirectory(font_name: str) -> Tuple[str, str, Path, bool]:
+def download_subdirectory(font_name: str) -> Tuple[str, str, Path, bool, None]:
     """Download the subdirectory from Google Fonts."""
     headers: Dict[str, str] = {}
     if default_github_token:
@@ -85,7 +85,7 @@ def download_subdirectory(font_name: str) -> Tuple[str, str, Path, bool]:
                 console.print(
                     f"[yellow]Warning: Failed to cache subdirectory: {e}[/yellow]"
                 )
-            return "thegooglefontsrepo", dir_font_name, temp_dir, True
+            return "thegooglefontsrepo", dir_font_name, temp_dir, True, None
         except Exception:
             continue
     console.print(
@@ -94,7 +94,9 @@ def download_subdirectory(font_name: str) -> Tuple[str, str, Path, bool]:
     raise ValueError(f"Font '{font_name}' not found in Google Fonts.")
 
 
-def fetch_google_fonts_repo(font_name: str) -> Tuple[str, str, Path | None, bool]:
+def fetch_google_fonts_repo(
+    font_name: str,
+) -> Tuple[str, str, Path | None, bool, str | None]:
     """Fetch the GitHub repo for a Google Font by parsing HTML files, or download subdirectory."""
     headers: Dict[str, str] = {}
     if default_github_token:
@@ -103,11 +105,34 @@ def fetch_google_fonts_repo(font_name: str) -> Tuple[str, str, Path | None, bool
     # First, check registry
     repo_info = get_repo_from_registry(font_name)
     if repo_info:
-        owner, repo = repo_info
+        owner, repo, source = repo_info
+        # Based on source, decide how to proceed
+        if source == "a":
+            # Try releases
+            try:
+                fetch_release_info(owner, repo, "latest")
+                return owner, repo, None, False, source
+            except Exception:
+                console.print(
+                    f"[yellow]Repo {owner}/{repo} has source 'a' but no releases, falling back...[/yellow]"
+                )
+        elif source == "f":
+            # Use fonts directory
+            console.print(
+                f"[yellow]Using fonts/ directory for {owner}/{repo} from registry.[/yellow]"
+            )
+            return owner, repo, None, False, source
+        elif source == "r":
+            # Use root
+            console.print(
+                f"[yellow]Using root directory for {owner}/{repo} from registry.[/yellow]"
+            )
+            return owner, repo, None, False, source
+        # If no source or unknown, or if source failed, use fallback logic
         # Check if the repo has releases
         try:
             fetch_release_info(owner, repo, "latest")
-            return owner, repo, None, False
+            return owner, repo, None, False, source
         except Exception:
             # Check if the repo has font files in fonts/ directory (recursive)
             try:
@@ -136,7 +161,7 @@ def fetch_google_fonts_repo(font_name: str) -> Tuple[str, str, Path | None, bool
                         f"[yellow]Repo {owner}/{repo} has no releases but has fonts/ "
                         "directory, using fonts/ download.[/yellow]"
                     )
-                    return owner, repo, None, False
+                    return owner, repo, None, False, source
             except Exception:
                 pass
             console.print(
@@ -196,7 +221,7 @@ def fetch_google_fonts_repo(font_name: str) -> Tuple[str, str, Path | None, bool
                         # Check if the repo has releases
                         try:
                             fetch_release_info(owner, repo, "latest")
-                            return owner, repo, None, False
+                            return owner, repo, None, False, None
                         except Exception:
                             # Check if the repo has font files in fonts/ directory (recursive)
                             try:
@@ -225,7 +250,7 @@ def fetch_google_fonts_repo(font_name: str) -> Tuple[str, str, Path | None, bool
                                         f"[yellow]Repo {owner}/{repo} has no releases but has fonts/ "
                                         "directory, using fonts/ download.[/yellow]"
                                     )
-                                    return owner, repo, None, False
+                                    return owner, repo, None, False, None
                             except Exception:
                                 pass
                             console.print(

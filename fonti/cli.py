@@ -119,10 +119,11 @@ def install(
                 is_google_fonts = False
                 extract_dir = None
                 is_subdirectory = False
+                source = None
             else:
                 # Google Fonts
                 font_name = repo_arg
-                owner, repo_name, extract_dir, is_subdirectory = (
+                owner, repo_name, extract_dir, is_subdirectory, source = (
                     fetch_google_fonts_repo(font_name)
                 )
                 repo_key = font_name.lower()
@@ -144,6 +145,7 @@ def install(
             is_google_fonts,
             pre_extract_dir=extract_dir,
             is_subdirectory=is_subdirectory,
+            source=source,
         )
 
 

@@ -4,7 +4,7 @@ import tarfile
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, Dict, List
 
 import httpx
 from fontTools.ttLib import TTFont  # pyright: ignore[reportMissingTypeStubs]
@@ -110,6 +110,7 @@ def install_single_repo(
     is_google_fonts: bool = False,
     pre_extract_dir: Path | None = None,
     is_subdirectory: bool = False,
+    source: str | None = None,
 ) -> None:
     """
     Install fonts from a single GitHub repository.
@@ -148,6 +149,82 @@ def install_single_repo(
             # For subdirectory, extract_dir is already provided
             extract_dir = pre_extract_dir
             version = get_subdirectory_version(repo_name)
+        elif release == "latest" and source == "r":
+            # Download font files from root
+            from .config import default_github_token
+
+            headers: Dict[str, str] = {}
+            if default_github_token:
+                headers["Authorization"] = f"Bearer {default_github_token}"
+            api_url = f"https://api.github.com/repos/{owner}/{repo_name}/contents/"
+            response = httpx.get(api_url, headers=headers)  # type: ignore
+            response.raise_for_status()
+            contents = response.json()
+            font_items = [
+                item
+                for item in contents
+                if item["type"] == "file"
+                and item["name"].endswith((".ttf", ".otf", ".woff", ".woff2"))
+            ]
+            if not font_items:
+                console.print(
+                    f"[red]No font files found in root of {owner}/{repo_name}[/red]"
+                )
+                raise ValueError("No font files in root")
+            temp_dir = Path(tempfile.mkdtemp())
+            for item in font_items:
+                blob_url = item["url"]
+                headers_blob = headers.copy()
+                headers_blob["Accept"] = "application/vnd.github.raw"
+                blob_response = httpx.get(blob_url, headers=headers_blob)  # type: ignore
+                blob_response.raise_for_status()
+                content = blob_response.content
+                if content.startswith(b"{"):
+                    import base64
+
+                    blob_data = blob_response.json()
+                    content = base64.b64decode(blob_data["content"])
+                file_path = temp_dir / item["name"]
+                file_path.write_bytes(content)
+            console.print(
+                f"[green]Downloaded {len(font_items)} font files from root of {owner}/{repo_name}.[/green]"
+            )
+            extract_dir = temp_dir
+            is_subdirectory = True
+            final_owner = owner
+            final_repo_name = repo_name
+            version = "latest"
+        elif release == "latest" and source == "f":
+            try:
+                version = get_fonts_dir_version(owner, repo_name)
+                cache_key = f"{owner}-{repo_name}-fonts-{version.replace(':', '-')}.zip"
+                if cache is not None and cache_key in cache:
+                    console.print(f"Using cached fonts directory: {cache_key}")
+                    cached_zip = str(cache[cache_key])  # type: ignore
+                    extract_dir = Path(tempfile.mkdtemp())
+                    with zipfile.ZipFile(cached_zip, "r") as zip_ref:
+                        zip_ref.extractall(extract_dir)
+                else:
+                    extract_dir = download_fonts_dir(owner, repo_name)
+                    if cache is not None:
+                        zip_path = CACHE_DIR / cache_key
+                        with zipfile.ZipFile(zip_path, "w") as zip_ref:
+                            for file_path in extract_dir.rglob("*"):
+                                if file_path.is_file():
+                                    zip_ref.write(
+                                        file_path,
+                                        file_path.relative_to(extract_dir),
+                                    )
+                        cache[cache_key] = str(zip_path)
+                        console.print("Fonts directory cached.")
+                is_subdirectory = True
+                final_owner = owner
+                final_repo_name = repo_name
+            except Exception as ex:
+                console.print(
+                    f"[red]No fonts directory found for {owner}/{repo_name}: {ex}[/red]"
+                )
+                raise
         elif release == "latest":
             try:
                 version, assets, _, final_owner, final_repo_name = fetch_release_info(

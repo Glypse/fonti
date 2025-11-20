@@ -42,7 +42,7 @@ def save_metadata(data: Dict[str, float | str]) -> None:
         pass
 
 
-def get_registry_data() -> Dict[str, Dict[str, str]]:
+def get_registry_data() -> Dict[str, Dict[str, Dict[str, str]]]:
     """Load the registry data from the local file."""
     if not REGISTRY_FILE.exists():
         return {}
@@ -117,27 +117,31 @@ def search_registry(font_name: str) -> Optional[Dict[str, str]]:
     registry = get_registry_data()
     normalized = font_name.lower().replace(" ", "-")
 
-    # Check direct key match
-    if normalized in registry:
-        return registry[normalized]
-
-    # Check name and display_name
-    for entry in registry.values():
-        if entry.get("name", "").lower().replace(" ", "-") == normalized:
-            return entry
-        if entry.get("display_name", "").lower().replace(" ", "-") == normalized:
-            return entry
+    # Iterate through all categories and fonts
+    for _, fonts in registry.items():
+        for font_key, entry in fonts.items():
+            if font_key == normalized:
+                return entry
+            if entry.get("name", "").lower().replace(" ", "-") == normalized:
+                return entry
+            if entry.get("display_name", "").lower().replace(" ", "-") == normalized:
+                return entry
 
     return None
 
 
-def get_repo_from_registry(font_name: str) -> Optional[Tuple[str, str]]:
-    """Get owner/repo from registry if available."""
+def get_repo_from_registry(font_name: str) -> Optional[Tuple[str, str, str]]:
+    """Get owner/repo/source from registry if available."""
     entry = search_registry(font_name)
     if entry and entry.get("link"):
         link = entry["link"]
         if "github.com/" in link:
             parts = link.split("github.com/")[1].split("/")
             if len(parts) >= 2:
-                return parts[0], parts[1].split(".")[0]  # remove .git if present
+                source = entry.get("source", "")
+                return (
+                    parts[0],
+                    parts[1].split(".")[0],
+                    source,
+                )  # remove .git if present
     return None
