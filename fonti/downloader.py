@@ -1,3 +1,4 @@
+import logging
 import shutil
 import tarfile
 import tempfile
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
     from .types import Asset
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 
 def _is_safe_archive_path(path: str, extract_dir: Path) -> bool:
@@ -116,6 +118,7 @@ def get_subdirectory_version(dir_font_name: str) -> str:
     path = f"{dir_part}/{font_name}"
     try:
         url = f"https://api.github.com/repos/google/fonts/commits?path={path}"
+        logger.debug(f"Fetching commits for path {path} from {url}")
         response = httpx.get(url, headers=headers)
         response.raise_for_status()
         commits = response.json()
@@ -135,6 +138,7 @@ def get_fonts_dir_version(owner: str, repo_name: str) -> str:
         headers["Authorization"] = f"Bearer {default_github_token}"
 
     url = f"https://api.github.com/repos/{owner}/{repo_name}/commits?path=fonts"
+    logger.debug(f"Fetching commits for fonts directory from {url}")
     response = httpx.get(url, headers=headers)
     response.raise_for_status()
     commits = response.json()
@@ -153,6 +157,7 @@ def download_fonts_dir(owner: str, repo_name: str) -> Path:
     def collect_font_files(path: str) -> List[Dict[str, Any]]:
         """Recursively collect font files from the path."""
         api_url = f"https://api.github.com/repos/{owner}/{repo_name}/contents/{path}"
+        logger.debug(f"Collecting font files from {api_url}")
         response = httpx.get(api_url, headers=headers)
         response.raise_for_status()
         contents = response.json()
@@ -173,6 +178,7 @@ def download_fonts_dir(owner: str, repo_name: str) -> Path:
     temp_dir = Path(tempfile.mkdtemp())
     for item in font_files:
         file_url = item["download_url"]
+        logger.debug(f"Downloading font file from {file_url}")
         file_response = httpx.get(file_url, headers=headers)
         file_response.raise_for_status()
         # Keep the relative path
@@ -195,6 +201,7 @@ def fetch_release_info(
     with console.status("[bold green]Fetching release info..."):
         if release == "latest":
             url = f"https://api.github.com/repos/{owner}/{repo_name}/releases/latest"
+            logger.debug(f"Fetching latest release from {url}")
             try:
                 response = httpx.get(url, headers=headers, follow_redirects=True)
                 response.raise_for_status()
@@ -217,6 +224,7 @@ def fetch_release_info(
                 if e.response.status_code == 404 and not release.startswith("v"):
                     # Try without 'v'
                     url = f"https://api.github.com/repos/{owner}/{repo_name}/releases/tags/{release}"
+                    logger.debug(f"Fetching release from {url}")
                     response = httpx.get(url, headers=headers, follow_redirects=True)
                     response.raise_for_status()
                 else:
@@ -320,6 +328,7 @@ def get_or_download_and_extract_archive(
         tmp_file.close()
 
         with console.status("[bold green]Downloading archive..."):
+            logger.debug(f"Downloading archive from {archive_url}")
             with httpx.stream("GET", archive_url, follow_redirects=True) as response:
                 response.raise_for_status()
                 with open(tmp_path, "wb") as f:

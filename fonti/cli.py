@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Dict, List
 
@@ -58,10 +59,16 @@ def install(
         "--style",
         help="Font style to install: roman, italic, or both",
     ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Enable verbose logging"
+    ),
 ):
     """
     Install fonts from a GitHub release or Google Fonts.
     """
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
+
     priorities = [p.strip() for p in format.split(",")]
     if not priorities or not all(p in VALID_FORMATS for p in priorities):
         console.print(
@@ -293,10 +300,16 @@ def update(
         None, help="Specific repos to update (leave empty for all)"
     ),
     changelog: bool = typer.Option(False, "--changelog", help="Show changelog"),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Enable verbose logging"
+    ),
 ):
     """
     Update installed fonts to the latest versions.
     """
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
+
     repos = [repo] if repo else []
     from .registry import update_registry
     from .updater import update_fonts

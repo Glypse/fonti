@@ -1,4 +1,5 @@
 import base64
+import logging
 import tempfile
 import zipfile
 from pathlib import Path
@@ -14,6 +15,7 @@ from .downloader import fetch_release_info, get_subdirectory_version
 from .registry import get_repo_from_registry
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 
 def parse_repo(repo_arg: str) -> Tuple[str, str]:
@@ -41,6 +43,7 @@ def download_subdirectory(font_name: str) -> Tuple[str, str, Path, bool, None]:
     for dir in dirs:
         try:
             api_url = f"https://api.github.com/repos/google/fonts/contents/{dir}/{font_name_lower}"
+            logger.debug(f"Fetching contents from {api_url}")
             response = httpx.get(api_url, headers=headers)
             response.raise_for_status()
             contents = response.json()
@@ -57,6 +60,7 @@ def download_subdirectory(font_name: str) -> Tuple[str, str, Path, bool, None]:
                 blob_url = item["url"]
                 headers_blob = headers.copy()
                 headers_blob["Accept"] = "application/vnd.github.raw"
+                logger.debug(f"Downloading blob from {blob_url}")
                 blob_response = httpx.get(blob_url, headers=headers_blob)
                 blob_response.raise_for_status()
                 content = blob_response.content
@@ -188,6 +192,7 @@ def fetch_google_fonts_repo(
 
     for url in urls:
         try:
+            logger.debug(f"Fetching HTML from {url}")
             response = httpx.get(url, headers=headers, follow_redirects=True)
             response.raise_for_status()
             html_content = response.text

@@ -1,3 +1,4 @@
+import logging
 from typing import TYPE_CHECKING, List, Tuple
 
 from packaging.version import Version
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
     from .types import FontEntry
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 
 def update_fonts(repo: List[str], changelog: bool) -> None:
@@ -150,6 +152,7 @@ def update_fonts(repo: List[str], changelog: bool) -> None:
             font_path = dest_dir / filename
             if font_path.exists():
                 try:
+                    logger.debug(f"Removing old font file {font_path}")
                     font_path.unlink()
                 except Exception as e:
                     console.print(f"[red]Could not delete {filename}: {e}[/red]")

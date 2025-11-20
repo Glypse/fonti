@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import shutil
 import tarfile
 import tempfile
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from .types import FontEntry
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 
 def install_fonts(
@@ -60,7 +62,9 @@ def install_fonts(
                 continue
 
     for font_file in valid_fonts:
-        shutil.move(str(font_file), str(dest_dir / font_file.name))
+        dest_path = dest_dir / font_file.name
+        logger.debug(f"Moving {font_file} to {dest_path}")
+        shutil.move(str(font_file), str(dest_path))
 
     number_installed_fonts = len(valid_fonts)
 
@@ -157,6 +161,7 @@ def install_single_repo(
             if default_github_token:
                 headers["Authorization"] = f"Bearer {default_github_token}"
             api_url = f"https://api.github.com/repos/{owner}/{repo_name}/contents/"
+            logger.debug(f"Fetching contents from root {api_url}")
             response = httpx.get(api_url, headers=headers)  # type: ignore
             response.raise_for_status()
             contents = response.json()
@@ -176,6 +181,7 @@ def install_single_repo(
                 blob_url = item["url"]
                 headers_blob = headers.copy()
                 headers_blob["Accept"] = "application/vnd.github.raw"
+                logger.debug(f"Downloading blob from {blob_url}")
                 blob_response = httpx.get(blob_url, headers=headers_blob)  # type: ignore
                 blob_response.raise_for_status()
                 content = blob_response.content

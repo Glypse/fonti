@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import shutil
 from collections import defaultdict
 from functools import partial
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     from .types import ExportedFontEntry
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 
 def export_fonts(output: str, stdout: bool) -> None:
@@ -55,6 +57,7 @@ def export_fonts(output: str, stdout: bool) -> None:
         console.print(json.dumps(exported, indent=2))
     else:
         try:
+            logger.debug(f"Writing exported data to {output}")
             with open(output, "w") as f:
                 json.dump(exported, f, indent=2)
             console.print(f"[green]Exported to {output}[/green]")
@@ -68,6 +71,7 @@ def import_fonts(file: str, force: bool, local: bool) -> None:
     Import a font library from an exported file.
     """
     try:
+        logger.debug(f"Loading exported data from {file}")
         with open(file) as f:
             exported: Dict[str, Dict[str, ExportedFontEntry]] = json.load(f)
     except Exception as e:
@@ -122,6 +126,7 @@ def fix_fonts(backup: bool, granular: bool) -> None:
     if backup:
         backup_file = INSTALLED_FILE.with_suffix(".json.backup")
         try:
+            logger.debug(f"Creating backup from {INSTALLED_FILE} to {backup_file}")
             shutil.copy(INSTALLED_FILE, backup_file)
             console.print(f"[green]Backup created: {backup_file}[/green]")
         except Exception as e:
@@ -327,5 +332,6 @@ def fix_fonts(backup: bool, granular: bool) -> None:
             )
             console.print(f"[green]{replaced_message}[/green]")
 
+    logger.debug("Saving fixed installed data")
     save_installed_data(installed_data)
     console.print(f"[green]Fixed {fixed_count} issue(s).[/green]")

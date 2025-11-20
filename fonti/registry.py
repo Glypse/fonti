@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -9,6 +10,7 @@ from rich.console import Console
 from .config import cache, default_registry_check_interval
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 REGISTRY_REPO_URL = "https://github.com/Glypse/fonti-registry.git"
 REGISTRY_DIR = Path.home() / ".fonti" / "registry"
@@ -58,6 +60,7 @@ def clone_registry() -> None:
     """Clone the registry repository with sparse checkout for only the JSON file."""
     console.print("[yellow]Cloning registry repository...[/yellow]")
     REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
+    logger.debug(f"Cloning registry from {REGISTRY_REPO_URL} to {REGISTRY_DIR}")
     repo = Repo.clone_from(REGISTRY_REPO_URL, REGISTRY_DIR, depth=1, no_checkout=True)
     repo.git.sparse_checkout("set", "--no-cone", "registry/fonti_registry.json")
     repo.git.checkout()
@@ -96,6 +99,7 @@ def update_registry(force: bool = False) -> None:
 
     console.print("[yellow]Updating registry...[/yellow]")
     # Fetch latest
+    logger.debug("Fetching latest registry updates")
     repo.remotes.origin.fetch(depth=1)
     repo.git.reset("--hard", "origin/main")
 
