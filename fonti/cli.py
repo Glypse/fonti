@@ -376,6 +376,16 @@ def fix(
     fix_fonts(backup, granular)
 
 
+@app.command()
+def list():
+    """
+    List all installed font families with their files, types, versions, and source links.
+    """
+    from .library import list_fonts
+
+    list_fonts()
+
+
 @cache_app.command("purge")
 def purge():
     """

@@ -338,3 +338,41 @@ def fix_fonts(backup: bool, granular: bool) -> None:
     logger.debug("Saving fixed installed data")
     save_installed_data(installed_data)
     console.print(f"[green]Fixed {fixed_count} issue(s).[/green]")
+
+
+def list_fonts() -> None:
+    """
+    List all installed font families with their files, types, versions, and source links.
+    """
+    data = load_installed_data()
+    if not data:
+        console.print("[yellow]No installed fonts found.[/yellow]")
+        return
+
+    for repo in sorted(data.keys()):
+        fonts = data[repo]
+        if not fonts:
+            continue
+
+        # Get owner and repo_name from first entry
+        first_entry = list(fonts.values())[0]
+        owner = first_entry.get("owner", "")
+        repo_name = first_entry.get("repo_name", repo)
+
+        # Determine the link
+        if repo_name.startswith(("ofl/", "apache/", "ufl/")):
+            link = f"https://github.com/google/fonts/tree/main/{repo_name}"
+        else:
+            link = f"https://github.com/{owner}/{repo_name}"
+
+        console.print(f"[bold blue]Family: {repo}[/bold blue]")
+        console.print(f"[link={link}]Source: {link}[/link]")
+        console.print("Files:")
+
+        for filename in sorted(fonts.keys()):
+            entry = fonts[filename]
+            file_type = entry["type"]
+            version = entry["version"]
+            console.print(f"  - {filename}: {file_type}, {version}")
+
+        console.print()  # Empty line between families
