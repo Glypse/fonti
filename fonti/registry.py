@@ -12,7 +12,7 @@ console = Console()
 
 REGISTRY_REPO_URL = "https://github.com/Glypse/fonti-registry.git"
 REGISTRY_DIR = Path.home() / ".fonti" / "registry"
-REGISTRY_FILE = REGISTRY_DIR / "fonti_registry.json"
+REGISTRY_FILE = REGISTRY_DIR / "registry" / "fonti_registry.json"
 METADATA_FILE = REGISTRY_DIR / ".registry_metadata"
 REGISTRY_CHECK_INTERVAL = default_registry_check_interval
 
@@ -59,8 +59,7 @@ def clone_registry() -> None:
     console.print("[yellow]Cloning registry repository...[/yellow]")
     REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
     repo = Repo.clone_from(REGISTRY_REPO_URL, REGISTRY_DIR, depth=1, no_checkout=True)
-    repo.git.sparse_checkout("init")
-    repo.git.sparse_checkout("set", "fonti_registry.json")
+    repo.git.sparse_checkout("set", "--no-cone", "registry/fonti_registry.json")
     repo.git.checkout()
     console.print("[green]Registry cloned.[/green]")
 
