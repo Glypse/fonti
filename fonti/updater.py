@@ -1,5 +1,5 @@
 import logging
-from typing import TYPE_CHECKING, List, Tuple
+from typing import List, Tuple
 
 from packaging.version import Version
 from rich.console import Console
@@ -12,9 +12,6 @@ from .config import (
 )
 from .downloader import fetch_release_info, get_fonts_dir_version
 from .installer import install_single_repo
-
-if TYPE_CHECKING:
-    from .types import FontEntry
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -30,7 +27,7 @@ def update_fonts(repo: List[str], changelog: bool) -> None:
         return
 
     updated_count = 0
-    repos_to_update: List[Tuple[str, str, str, str, str, List[FontEntry], str]] = []
+    repos_to_update: List[Tuple[str, str, str, str, str, List[str], str]] = []
 
     repos_to_check: List[str] = []
     if not repo:
@@ -114,7 +111,7 @@ def update_fonts(repo: List[str], changelog: bool) -> None:
                         latest_version,
                         final_owner,
                         final_repo_name,
-                        list(fonts.values()),
+                        list(fonts.keys()),
                         body,
                     )
                 )
@@ -128,7 +125,7 @@ def update_fonts(repo: List[str], changelog: bool) -> None:
                         latest_version,
                         final_owner,
                         final_repo_name,
-                        list(fonts.values()),
+                        list(fonts.keys()),
                         body,
                     )
                 )
@@ -147,8 +144,7 @@ def update_fonts(repo: List[str], changelog: bool) -> None:
         )
         # Uninstall old
         dest_dir = default_path
-        for font_info in fonts:
-            filename = font_info["filename"]
+        for filename in fonts:
             font_path = dest_dir / filename
             if font_path.exists():
                 try:

@@ -79,7 +79,6 @@ def install_fonts(
                     (dest_dir / font_file.name).read_bytes()
                 ).hexdigest()
                 entry: FontEntry = {
-                    "filename": font_file.name,
                     "hash": file_hash,
                     "type": selected_pri,
                     "version": version,
@@ -370,8 +369,7 @@ def install_single_repo(
                             f"[yellow]Forcing reinstall of {repo_key} version {version}...[/yellow]"
                         )
                 # Remove old fonts
-                for font_info in installed_data[repo_key].values():
-                    filename = font_info["filename"]
+                for filename in installed_data[repo_key]:
                     font_path = dest_dir / filename
                     if font_path.exists():
                         try:

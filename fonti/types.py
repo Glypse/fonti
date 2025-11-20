@@ -8,7 +8,6 @@ class Asset(TypedDict):
 
 
 class FontEntry(TypedDict):
-    filename: str
     hash: str
     type: str
     version: str
@@ -17,7 +16,6 @@ class FontEntry(TypedDict):
 
 
 class ExportedFontEntry(TypedDict, total=False):
-    filename: str
     type: str
     version: str
     owner: str

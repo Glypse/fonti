@@ -41,9 +41,8 @@ def export_fonts(output: str, stdout: bool) -> None:
     exported: Dict[str, Dict[str, ExportedFontEntry]] = {}
     for repo, fonts in data.items():
         exported[repo] = {}
-        for _filename, entry in fonts.items():
+        for filename, entry in fonts.items():
             exported_entry: ExportedFontEntry = {
-                "filename": entry["filename"],
                 "type": entry["type"],
                 "version": entry["version"],
             }
@@ -51,7 +50,7 @@ def export_fonts(output: str, stdout: bool) -> None:
                 exported_entry["owner"] = entry["owner"]
             if "repo_name" in entry:
                 exported_entry["repo_name"] = entry["repo_name"]
-            exported[repo][entry["filename"]] = exported_entry
+            exported[repo][filename] = exported_entry
 
     if stdout:
         console.print(json.dumps(exported, indent=2))
@@ -166,8 +165,9 @@ def fix_fonts(backup: bool, granular: bool) -> None:
 
     def reinstall_repo(repo: str) -> int:
         try:
-            owner = list(installed_data[repo].values())[0]["owner"]
-            repo_name = repo
+            first_entry = list(installed_data[repo].values())[0]
+            owner = first_entry["owner"]
+            repo_name = first_entry["repo_name"]
             install_single_repo(
                 owner,
                 repo_name,
@@ -193,11 +193,14 @@ def fix_fonts(backup: bool, granular: bool) -> None:
     # Detect invalid repos
     invalid_repos = []
     for repo in installed_data.keys():
-        try:
-            parse_repo(repo)
-        except ValueError:
-            invalid_repos.append(repo)
-            actions.append((f"Remove invalid repo: {repo}", partial(del_repo, repo)))
+        if "/" in repo:
+            try:
+                parse_repo(repo)
+            except ValueError:
+                invalid_repos.append(repo)
+                actions.append(
+                    (f"Remove invalid repo: {repo}", partial(del_repo, repo))
+                )
 
     # Detect type/extension mismatches
     type_to_ext = {
